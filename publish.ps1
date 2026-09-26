@@ -22,7 +22,10 @@ param(
     [string]$Message = "feat: SDD 复现智能日报生成器 v1.1（含工时统计与静态日报站）"
 )
 
-$ErrorActionPreference = "Stop"
+# 脚本要调用 git 等外部命令，它们把错误写到 stderr；若这里设为 Stop，
+# PowerShell 5.1 会把 stderr 当成终止错误直接抛出（网络失败时会崩栈）。
+# 统一用 Continue，并逐个检查 $LASTEXITCODE。
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
@@ -49,7 +52,7 @@ if (-not $initialized) {
     Info "[1/5] 初始化本地仓库并绑定远端"
     git init -q -b $Branch
     git remote add origin $Remote
-    git fetch origin $Branch
+    git fetch origin $Branch 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
         # 以远端 main 为基线：既保留远端已有历史，又不覆盖本地工作区
         git branch -f $Branch "origin/$Branch" | Out-Null
@@ -57,16 +60,21 @@ if (-not $initialized) {
         git reset --mixed "origin/$Branch" | Out-Null
         Ok "    已基于远端 $Branch 建立基线（远端历史保留）"
     } else {
-        Warn "    远端没有 $Branch 分支，将创建新分支"
+        Warn "    无法读取远端 $Branch（网络不通或分支不存在），按新建分支处理"
     }
 } else {
     Info "[1/5] 检测到已初始化的仓库，直接增量提交"
-    if (-not (git remote | Select-String -SimpleMatch "origin")) {
-        git remote add origin $Remote
-    } else {
+    $remotes = git remote
+    if ($remotes -contains "origin") {
         git remote set-url origin $Remote
+    } else {
+        git remote add origin $Remote
     }
-    git fetch origin $Branch 2>$null | Out-Null
+    Info "    同步远端状态（失败不影响本地提交，只影响能否快进推送）"
+    git fetch origin $Branch 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Warn "    无法读取远端状态（多半是网络问题），继续本地提交"
+    }
 }
 
 Info "[2/5] 扫描变更（.gitignore 已排除虚拟环境、缓存与本地产物）"

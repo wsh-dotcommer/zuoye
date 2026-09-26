@@ -58,3 +58,4 @@ notify:
     enabled: false
   lark_bot:
     enabled: false
+    secret: ""                        # 机器人安全设置选「签名校验」时改成 ${LARK_BOT_SECRET}

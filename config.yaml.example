@@ -68,5 +68,6 @@ notify:
     recipients:
       - leader@example.com
   lark_bot:
-    enabled: false
-    webhook: ${LARK_BOT_WEBHOOK}
+    enabled: false                    # true → 不加 --dry-run 就会把日报推到飞书群
+    webhook: ${LARK_BOT_WEBHOOK}      # 填在 .env：飞书群机器人 Webhook 地址
+    secret: ""                        # 机器人安全设置选「签名校验」时改成 ${LARK_BOT_SECRET}

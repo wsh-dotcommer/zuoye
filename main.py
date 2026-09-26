@@ -2,6 +2,7 @@
 
 用法：
     python main.py --check                        # 体检：配置、环境变量、GitHub / SMTP / 飞书连通性
+    python main.py --test-lark                    # 只发一条飞书自检消息，验证群机器人通道
     python main.py --dry-run                      # 采集 + 生成 + 站点渲染，不推送
     python main.py                                # 完整流程（默认采集当日 00:00 → 现在）
     python main.py --date 2026-09-18               # 补跑历史某日
@@ -58,6 +59,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.check:
         return _run_checks(config, logger)
+    if args.test_lark:
+        return _run_lark_check(config, logger)
     return _run_pipeline(config, args, logger)
 
 
@@ -214,10 +217,35 @@ def _push(config: Config, report, logger: JsonLineLogger) -> None:
 
     lark_config = config.notify.lark_bot
     if lark_config.enabled:
-        ok = lark_bot.send(report, lark_bot.LarkBotTarget(webhook=lark_config.webhook), logger=logger)
+        target = lark_bot.LarkBotTarget(webhook=lark_config.webhook, secret=lark_config.secret)
+        ok = lark_bot.send(report, target, logger=logger)
         logger.info("push_result", channel="lark_bot", ok=ok)
     else:
         logger.info("push_skipped", channel="lark_bot", reason="disabled")
+
+
+def _run_lark_check(config: Config, logger: JsonLineLogger) -> int:
+    """--test-lark：只做飞书群机器人连通性自检（不采集、不生成、不发邮件）。"""
+
+    lark_config = config.notify.lark_bot
+    if not lark_config.webhook:
+        logger.error("lark_check_problem", detail="notify.lark_bot.webhook 为空，未发起请求")
+        print(
+            "[飞书自检失败] notify.lark_bot.webhook 为空："
+            "请先按 README「接入飞书群机器人」拿到 Webhook 并写入 .env 的 LARK_BOT_WEBHOOK",
+            file=sys.stderr,
+        )
+        return EXIT_CHECK_FAILED
+
+    target = lark_bot.LarkBotTarget(webhook=lark_config.webhook, secret=lark_config.secret)
+    ok, detail = lark_bot.check(target, logger=logger)
+    logger.info("lark_bot_check_result", ok=ok, enabled=lark_config.enabled, signed=bool(lark_config.secret))
+    print(f"[飞书自检] {detail}")
+    if not ok:
+        return EXIT_CHECK_FAILED
+    if not lark_config.enabled:
+        print("[提示] 自检已通过，但 notify.lark_bot.enabled 仍为 false；确认无误后改成 true 就会正式推送日报。")
+    return EXIT_OK
 
 
 def _run_checks(config: Config, logger: JsonLineLogger) -> int:
@@ -263,7 +291,13 @@ def _run_checks(config: Config, logger: JsonLineLogger) -> int:
 
     if config.notify.lark_bot.enabled and not config.notify.lark_bot.webhook:
         problems.append("飞书机器人已启用但 Webhook 为空")
-    logger.info("check_lark_bot", enabled=config.notify.lark_bot.enabled)
+    logger.info(
+        "check_lark_bot",
+        enabled=config.notify.lark_bot.enabled,
+        channel_configured=bool(config.notify.lark_bot.webhook),
+        signing=bool(config.notify.lark_bot.secret),
+        hint="用 --test-lark 可发一条自检消息验证通道",
+    )
 
     if problems:
         for problem in problems:
@@ -324,6 +358,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--config", default="config.yaml", help="配置文件路径（默认 config.yaml）")
     parser.add_argument("--check", action="store_true", help="校验配置、环境变量与外部连通性")
+    parser.add_argument("--test-lark", action="store_true", help="只发一条飞书自检消息，验证群机器人通道")
     parser.add_argument("--dry-run", action="store_true", help="执行采集与生成，但不推送")
     parser.add_argument("--date", help="补跑指定日期（YYYY-MM-DD），窗口为该日整天")
     parser.add_argument("--since", help="采集窗口起点（ISO 8601 或 YYYY-MM-DD）")

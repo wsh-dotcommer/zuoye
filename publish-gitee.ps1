@@ -17,7 +17,7 @@ param(
     [string]$Message = "chore: 同步本地改动"
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
@@ -45,7 +45,8 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Info "[2/4] 绑定 Gitee 远端"
-if (git remote | Select-String -SimpleMatch "^gitee$") {
+$remotes = git remote
+if ($remotes -contains "gitee") {
     git remote set-url gitee $Gitee
 } else {
     git remote add gitee $Gitee

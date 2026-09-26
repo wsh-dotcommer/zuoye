@@ -10,7 +10,7 @@ PR/Issue 评论当"协作沟通"；飞书只作为推送通道。在书中范围
 
 - `specs/proposal.md`：背景、范围（做什么/不做什么）、验收标准、术语
 - `specs/design.md`：管道架构、模块职责、数据模型、接口契约、ADR、非功能性约束
-- `specs/tasks.md`：10 个可验收任务与 7 阶段执行顺序
+- `specs/tasks.md`：12 个可验收任务与 9 阶段执行顺序（v1.1 加工时、v1.2 加飞书接入）
 
 ## 快速开始
 
@@ -41,6 +41,38 @@ Copy-Item .env.example .env                  # 按需填入凭据（.env 已被 
 | `--since 2026-09-01 --until 2026-09-26` | 自定义采集窗口 |
 | `--dry-run` | 只生成不推送 |
 | `--check` | 只体检，不采集、不推送 |
+| `--test-lark` | 只往飞书群发一条自检消息，不采集、不生成、不发邮件 |
+
+## 命令速查表：这条命令会不会发消息？
+
+**核心规则：加 `--dry-run` 就一条推送都不发；不加就会按 `notify` 开关发邮件 / 推飞书。**
+
+| 命令 | 采集 | 生成日报 | 渲染站点 | 发邮件 / 推飞书 |
+| --- | --- | --- | --- | --- |
+| `main.py --config config.yaml` | 当天 00:00 → 现在 | ✅ | ✅ | ✅ 按开关发 |
+| `main.py --config config.yaml --date 2026-09-26` | 指定那整天 | ✅ | ✅ | ✅ 按开关发 |
+| `main.py --config config.yaml --dry-run` | 当天到现在 | ✅ | ✅ | ❌ 只预览 |
+| `main.py --config config.yaml --dry-run --date 2026-09-26` | 指定那整天 | ✅ | ✅ | ❌ 只预览 |
+| `main.py --config config.yaml --check` | 不采集 | ❌ | ❌ | ❌ 只体检 |
+| `main.py --config config.yaml --test-lark` | 不采集 | ❌ | ❌ | ⚠️ 只发一条飞书自检消息 |
+
+当前推送开关（`config.yaml` 的 `notify` 段）：
+
+```yaml
+notify:
+  email:     { enabled: true }    # true → 不加 --dry-run 就会发邮件
+  lark_bot:  { enabled: false }   # true → 不加 --dry-run 就会推飞书群
+```
+
+飞书那条不受开关限制的例外是 `--test-lark`：它专为"通道到底通不通"设计，无论
+`enabled` 是 true 还是 false，都只发一条纯文本自检消息（详见下方「接入飞书群机器人」）。
+
+其他要点：
+
+- **工作日**：直接跑 `main.py --config config.yaml` 即可（采集"今天到现在"）。**周末/节假日**会被自动跳过，要看那天就显式加 `--date YYYY-MM-DD`。
+- `--date` 后面**必须跟日期**，不能只写 `--date`。
+- 同一日期重复运行是**幂等覆盖**：`output/`、`docs/`、SQLite 都是按日期更新，不会产生重复记录。
+- 推荐的日常节奏：先 `--dry-run` 看内容对不对 → 确认后再去掉 `--dry-run` 正式发。
 
 ## 产物
 
@@ -105,6 +137,85 @@ Copy-Item config.demo.yaml.example config.demo.yaml
 
 （演示配置采集的是 `openai/openai-python` 当天的真实公开数据；改用 `config.yaml`
 跑自己的仓库时，同一天的日报与站点页面会被覆盖成你自己团队的内容——按日期幂等。）
+
+## 开启邮件推送（以 QQ 邮箱为例）
+
+1. QQ 邮箱 → 设置 → 账户 → 开启「IMAP/SMTP 服务」→ 生成**授权码**（16 位，**不是**登录密码）
+2. 在项目根目录的 `.env` 里填两行（该文件已被 `.gitignore` 排除）：
+   ```
+   SMTP_USERNAME=你的邮箱@qq.com
+   SMTP_PASSWORD=刚生成的授权码
+   ```
+3. `config.yaml` 的 `notify.email`：`enabled: true`，`host` 用 `smtp.qq.com`（163 用 `smtp.163.com`），
+   `sender` 与 `SMTP_USERNAME` 保持一致，`recipients` 填收件人
+4. 体检：`.\.venv\Scripts\python.exe main.py --config config.yaml --check`
+   → 看到 `"event": "check_smtp", "ok": true` 就成了；缺哪个变量它会直接报出变量名
+5. 正式发送（**去掉 `--dry-run`**）：
+   `.\.venv\Scripts\python.exe main.py --config config.yaml --date 2026-09-26`
+
+密钥解析优先级：**真实环境变量 > `.env`**；`.env` 会被程序自动加载（配置同目录与当前目录都认），
+占位符解析为空值时视同缺失，由 `--check` 报出。飞书同理，见下一节。
+
+## 接入飞书群机器人（v1.2）
+
+飞书在这里只是**推送通道**（数据源仍然只使用 GitHub）：日报生成后，把 Markdown 卡片推到一个飞书群。
+用的是群里的「自定义机器人」，不需要建企业自建应用、不需要申请任何开放平台权限。
+
+### 第 1 步：在飞书里拿到 Webhook 地址
+
+1. 打开飞书，进入（或新建）你要接收日报的群
+2. 群右上角 **设置 → 群机器人 → 添加机器人 → 自定义机器人**
+3. 起个名字（如「智能日报」）→ 点 **添加**
+4. 在「安全设置」里选一种（三选一，推荐第 1 种）：
+   - **签名校验**：飞书给你一串密钥，**复制下来**（下面填到 `LARK_BOT_SECRET`）
+   - **自定义关键词**：填 `日报`（本项目日报的标题、正文里都带"智能日报"，一定命中）
+   - **IP 白名单**：只有在固定公网 IP 的服务器上跑才建议用
+5. 复制 **Webhook 地址**，形如 `https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx-xxxx-xxxx`
+
+### 第 2 步：填进 `.env` 与 `config.yaml`
+
+`.env`（已被 `.gitignore` 排除，不会进版本库）：
+
+```
+LARK_BOT_WEBHOOK=粘贴第 1 步复制的 Webhook 地址
+LARK_BOT_SECRET=第 1 步选「签名校验」时粘贴那串密钥；选关键词/白名单就留空
+```
+
+`config.yaml` 的 `notify.lark_bot`：
+
+```yaml
+notify:
+  lark_bot:
+    enabled: true                  # 确认自检通过后再改成 true
+    webhook: ${LARK_BOT_WEBHOOK}
+    secret: ${LARK_BOT_SECRET}     # 没启用签名校验就写 ""
+```
+
+### 第 3 步：自检（这一步不发日报、不发邮件）
+
+```powershell
+.\.venv\Scripts\python.exe main.py --config config.yaml --test-lark
+```
+
+- 成功：群里出现「智能日报 · 飞书机器人连通性自检」，命令行打印 `[飞书自检] 飞书机器人连通性正常…`
+- 失败：命令行打印失败原因；`logs/daily-report.jsonl` 里有飞书返回体与提示
+  （`19021` = 签名校验没过，检查 `LARK_BOT_SECRET`；`19024` = 关键词没命中，关键词填 `日报`）
+
+### 第 4 步：正式推送
+
+```powershell
+# 先干跑看内容对不对（不推送）
+.\.venv\Scripts\python.exe main.py --config config.yaml --dry-run --date 2026-09-26
+
+# 去掉 --dry-run 才会真推送：飞书群收到卡片，邮件按 notify.email.enabled 决定发不发
+.\.venv\Scripts\python.exe main.py --config config.yaml --date 2026-09-26
+```
+
+排错要点：
+
+- 推送失败**不会**影响日报生成与站点渲染，失败只记日志（退出码不变），所以"群里没消息"时先看 `logs/daily-report.jsonl` 里的 `push_result`
+- 机器人被移出群、Webhook 被重置后推送会失败，重跑一次 `--test-lark` 即可确认
+- `--test-lark` 与 `--dry-run` 是两件不同的事：前者只验证飞书通道，后者只做"生成但不推送"
 
 ## 定时运行
 
