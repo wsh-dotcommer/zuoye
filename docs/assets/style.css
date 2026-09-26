@@ -1,0 +1,99 @@
+:root {
+  --bg: #f6f4ef;
+  --card: #ffffff;
+  --ink: #1f2a24;
+  --muted: #6b7a71;
+  --line: #e2ded4;
+  --accent: #1f6f54;
+  --warn: #a8431f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 24px 16px 48px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+.page { max-width: 760px; margin: 0 auto; }
+
+.header {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px 22px;
+  margin-bottom: 18px;
+}
+
+.header h1 { margin: 0 0 8px; font-size: 22px; }
+.meta { margin: 0; color: var(--muted); font-size: 13px; }
+
+.summary { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 14px 0 0; }
+.summary li {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.summary li.ok { color: var(--accent); border-color: #cfe3d9; background: #f1f8f4; }
+.summary li.failed { color: var(--warn); border-color: #ebd3c8; background: #fdf4f0; }
+
+.member {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px 22px;
+  margin-bottom: 16px;
+}
+
+.member h2 { margin: 0 0 4px; font-size: 17px; }
+.username { color: var(--muted); font-weight: 400; font-size: 13px; }
+
+.block { margin-top: 14px; }
+.block h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--accent);
+  border-left: 3px solid var(--accent);
+  padding-left: 8px;
+}
+.block ul { margin: 0; padding-left: 20px; }
+.block li { margin: 2px 0; }
+
+.empty, .failed-note { margin: 0; color: var(--muted); font-size: 13px; }
+.failed-note { color: var(--warn); }
+
+.entries { list-style: none; padding: 0; margin: 0; }
+.entries li { margin-bottom: 10px; }
+.entry {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 14px 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.entry:hover { border-color: var(--accent); }
+.entry .date { font-weight: 600; }
+.entry .info { color: var(--muted); font-size: 13px; }
+
+.back { text-align: center; margin-top: 22px; }
+.back a { color: var(--accent); text-decoration: none; font-size: 13px; }
+
+.footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 26px; }
+
+@media (max-width: 520px) {
+  body { padding: 16px 10px 32px; font-size: 14px; }
+  .header, .member { padding: 16px; }
+  .header h1 { font-size: 19px; }
+}

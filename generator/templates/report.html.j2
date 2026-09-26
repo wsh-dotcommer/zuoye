@@ -1,0 +1,37 @@
+{% extends "base.html.j2" %}
+{% block content %}
+    <header class="header">
+      <h1>{{ view.title }}</h1>
+      <p class="meta">团队：{{ view.team_name }} · 生成时间：{{ view.generated_at }}</p>
+{% if view.hours_summary %}
+      <p class="meta">工时：团队合计 {{ view.hours_summary.total }}h · 人均 {{ view.hours_summary.average }}h（{{ view.hours_summary.note }}）</p>
+{% endif %}
+      <ul class="summary">
+{% for source in view.source_summary %}
+        <li class="{{ 'ok' if source.ok else 'failed' }}">{{ source.label }} {{ source.count }} 条{% if not source.ok %} · 数据获取失败{% endif %}</li>
+{% endfor %}
+      </ul>
+    </header>
+{% for member in view.members %}
+    <section class="member">
+      <h2>{{ member.name }}<span class="username">（{{ member.github_username }}）</span></h2>
+{% for section in member.sections %}
+      <section class="block">
+        <h3>{{ section.title }}</h3>
+{% if section.state == "ok" %}
+        <ul>
+{% for item in section.lines %}
+          <li>{{ item[2:] if item.startswith("- ") else item }}</li>
+{% endfor %}
+        </ul>
+{% else %}
+        <p class="{{ 'empty' if section.state == 'empty' else 'failed-note' }}">{{ section.note }}</p>
+{% endif %}
+      </section>
+{% endfor %}
+    </section>
+{% endfor %}
+{% if back_link %}
+    <p class="back"><a href="index.html">← 返回日报列表</a></p>
+{% endif %}
+{% endblock %}

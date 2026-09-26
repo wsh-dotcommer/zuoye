@@ -1,0 +1,72 @@
+# 智能日报生成器配置模板
+# 使用方式：复制为 config.yaml 后按团队实际情况修改；密钥一律用 ${环境变量} 占位。
+
+team:
+  name: 研发团队
+  leader_email: leader@example.com
+  timezone: Asia/Shanghai
+
+# 采集范围：只采集这里列出的仓库
+repos:
+  - owner: wsh-dotcommer
+    name: zuoye
+
+# 成员映射表：把 GitHub 用户名/邮箱归一到「人」
+members:
+  - name: 红豆
+    github_username: wsh-dotcommer
+    github_emails:
+      - 3011859592@qq.com
+  - name: 示例成员A
+    github_username: example-a
+    github_emails: []
+  - name: 示例成员B
+    github_username: example-b
+    github_emails: []
+
+sources:
+  github:
+    token: ${GITHUB_TOKEN}          # 公开仓库可留空；未设置环境变量时按匿名访问
+    include_others: false            # true 表示未映射到的作者也单独成段
+    exclude_bots: true               # 默认排除机器人账号（如 dependabot[bot]）
+    keywords: [feat, fix, docs, refactor, test, 日报, 规范, SDD]
+    sensitive_keywords: [薪资, 绩效, 裁员, 期权, 人事, 调薪]
+    max_commit_details: 100          # 单次最多获取多少条提交的变更统计
+    max_issue_timelines: 50          # 单次最多查询多少个 Issue 的 timeline 事件
+    per_page: 100
+    retry_times: 3
+    retry_interval_seconds: 5
+    rate_limit_max_wait_seconds: 300
+    timeout_seconds: 15
+
+report:
+  output_dir: output                 # Markdown / HTML 日报输出目录
+  site_dir: docs                     # 静态日报站输出目录（GitHub Pages 发布 main 分支 /docs）
+  site_title: 智能日报
+  storage_path: data/reports.sqlite3
+  log_path: logs/daily-report.jsonl
+  skip_weekends: true
+  holidays: []                       # 法定节假日需自行维护，如 [2026-10-01, 2026-10-02]
+
+# 工时统计（v1.1）：由提交时间按“会话法”推导，非真实考勤
+hours:
+  enabled: true
+  gap_minutes: 60                    # 相邻提交间隔超过该分钟数即算新的工作段
+  wrap_up_hours: 0.5                 # 每个工作段的收尾时长（只有一条提交的段按此计）
+  rounding_hours: 0.5                # 结果四舍五入到的网格
+  daily_cap_hours: 12                # 单人单日工时上限
+
+notify:
+  email:
+    enabled: false
+    host: smtp.example.com
+    port: 465
+    use_ssl: true
+    sender: bot@example.com
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    recipients:
+      - leader@example.com
+  lark_bot:
+    enabled: false
+    webhook: ${LARK_BOT_WEBHOOK}

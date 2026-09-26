@@ -1,0 +1,60 @@
+# 演示用配置：采集一个活跃的公开仓库（openai/openai-python）
+# 用途：自己的仓库还没有内容时，用真实公开数据跑通"三个板块都有内容"的效果。
+# 注意：公开仓库请求量大，这里把详情统计与 timeline 预算收紧，避免触发匿名限流。
+# 用法：
+#   Copy-Item config.demo.yaml.example config.demo.yaml
+#   .\.venv\Scripts\python.exe main.py --config config.demo.yaml --dry-run --since 2026-09-25T00:00:00 --until 2026-09-25T18:00:00
+# 换成书作者的仓库（提交多、评论少）：
+#   repos: [{ owner: huangjia2019, name: sdd-in-action }]
+#   --since 2026-06-27 --until 2026-08-26
+
+team:
+  name: 开源演示团队
+  leader_email: leader@example.com
+  timezone: Asia/Shanghai
+
+repos:
+  - owner: openai
+    name: openai-python
+
+members:
+  - name: 示例成员
+    github_username: example-member
+    github_emails: []
+
+sources:
+  github:
+    token: ${GITHUB_TOKEN}
+    include_others: true            # 演示仓库里其他作者的提交也单独成段
+    exclude_bots: true              # 排除 github-actions[bot] 等机器人噪声
+    keywords: []
+    sensitive_keywords: [薪资, 绩效, 裁员, 期权, 人事, 调薪]
+    max_commit_details: 5            # 公开大仓库：只取少量提交的变更统计
+    max_issue_timelines: 5           # 只查询少量 Issue 的 timeline，其余走字段推断
+    per_page: 100
+    retry_times: 3
+    retry_interval_seconds: 5
+    rate_limit_max_wait_seconds: 300
+    timeout_seconds: 20
+
+report:
+  output_dir: output
+  site_dir: docs
+  site_title: 智能日报
+  storage_path: data/reports.sqlite3
+  log_path: logs/daily-report.jsonl
+  skip_weekends: true
+  holidays: []
+
+hours:
+  enabled: true
+  gap_minutes: 60
+  wrap_up_hours: 0.5
+  rounding_hours: 0.5
+  daily_cap_hours: 12
+
+notify:
+  email:
+    enabled: false
+  lark_bot:
+    enabled: false

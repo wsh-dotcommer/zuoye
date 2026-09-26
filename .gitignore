@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.env
+*.pdf
+config.yaml
+config.demo.yaml
+config.book.yaml
+demo/
+output/
+logs/
+data/

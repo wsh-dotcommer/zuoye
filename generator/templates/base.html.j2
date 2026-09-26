@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title }}</title>
+  <style>{{ style }}</style>
+</head>
+<body>
+  <main class="page">
+{% block content %}{% endblock %}
+    <footer class="footer">由智能日报生成器生成 · {{ generated_at }}</footer>
+  </main>
+</body>
+</html>

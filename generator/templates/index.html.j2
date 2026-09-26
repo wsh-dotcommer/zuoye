@@ -1,0 +1,21 @@
+{% extends "base.html.j2" %}
+{% block content %}
+    <header class="header">
+      <h1>{{ site_title }}</h1>
+      <p class="meta">{{ team_name }} · 共 {{ entries|length }} 期日报</p>
+    </header>
+{% if entries %}
+    <ul class="entries">
+{% for entry in entries %}
+      <li>
+        <a class="entry" href="{{ entry.site_file }}">
+          <span class="date">{{ entry.date }}</span>
+          <span class="info">{{ entry.member_count }} 名成员 · 生成于 {{ entry.generated_at }}</span>
+        </a>
+      </li>
+{% endfor %}
+    </ul>
+{% else %}
+    <p class="empty">暂无日报</p>
+{% endif %}
+{% endblock %}
