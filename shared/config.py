@@ -113,6 +113,7 @@ class EmailConfig:
 class LarkBotConfig:
     enabled: bool
     webhook: str
+    secret: str = ""
 
 
 @dataclass(frozen=True)
@@ -136,14 +137,30 @@ class Config:
     required_missing_env: tuple[str, ...] = field(default=())
 
 
-def load_config(path: str | Path, env: Mapping[str, str] | None = None) -> Config:
-    """读取并校验配置，返回强类型配置对象。"""
+def load_config(
+    path: str | Path,
+    env: Mapping[str, str] | None = None,
+    *,
+    cwd: str | Path | None = None,
+) -> Config:
+    """读取并校验配置，返回强类型配置对象。
+
+    `env` 为 None 时会自动加载 `.env`（配置文件同目录 + `cwd`，真实环境变量优先）；
+    `cwd` 仅用于测试时指定查找目录。
+    """
 
     config_path = Path(path)
     if not config_path.exists():
         raise ConfigError(f"配置文件不存在: {config_path}")
 
     environment = dict(os.environ if env is None else env)
+    if env is None:
+        # .env 文件（与配置文件同目录、以及当前工作目录），真实环境变量优先级更高
+        file_env: dict[str, str] = {}
+        base_dir = Path(cwd) if cwd is not None else Path.cwd()
+        for candidate in (config_path.parent / ".env", base_dir / ".env"):
+            file_env.update(load_env_file(candidate))
+        environment = {**file_env, **environment}
     try:
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:  # pragma: no cover - YAML 语法错误分支
@@ -254,11 +271,38 @@ def _resolve_placeholders(
             name = match.group(1)
             referenced.append(name)
             value = env.get(name)
-            if value is None:
+            if value is None or value == "":
                 missing.append(name)
                 return ""
             return value
     return node
+
+
+def load_env_file(path: str | Path) -> dict[str, str]:
+    """读取 .env 文件（KEY=VALUE，支持 # 注释、引号与 export 前缀）。
+
+    不引入第三方依赖；文件不存在时返回空字典（design.md §6.2）。
+    """
+
+    env_path = Path(path)
+    if not env_path.exists():
+        return {}
+    values: dict[str, str] = {}
+    # utf-8-sig：兼容记事本等编辑器保存时带 BOM 的情况（否则第一行的键会被读坏）
+    for raw_line in env_path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.lower().startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            values[key] = value
+    return values
 
 
 def _require_mapping(raw: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -404,6 +448,7 @@ def _parse_notify(raw: Mapping[str, Any], original: Mapping[str, Any] | None = N
     lark_bot = LarkBotConfig(
         enabled=bool(lark_raw.get("enabled", False)),
         webhook=str(lark_raw.get("webhook", "")).strip(),
+        secret=str(lark_raw.get("secret", "")).strip(),
     )
 
     if email.enabled:
