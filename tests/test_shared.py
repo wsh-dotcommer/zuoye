@@ -49,6 +49,90 @@ def test_load_config_marks_required_missing_env(tmp_path: Path) -> None:
     assert loaded.required_missing_env == ("LARK_BOT_WEBHOOK",)
 
 
+def test_load_config_parses_lark_secret(tmp_path: Path) -> None:
+    """v1.2：飞书机器人签名密钥从环境变量注入，未配置时为空字符串（不启用签名）。"""
+
+    text = config_text(tmp_path).replace(
+        "  lark_bot:\n    enabled: false",
+        "  lark_bot:\n    enabled: true\n    webhook: ${LARK_BOT_WEBHOOK}\n    secret: ${LARK_BOT_SECRET}",
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    loaded = load_config(
+        path,
+        env={"GITHUB_TOKEN": "test-token", "LARK_BOT_WEBHOOK": "https://example.com/hook", "LARK_BOT_SECRET": "s3cret"},
+    )
+    assert loaded.notify.lark_bot.secret == "s3cret"
+
+    unsigned = load_config(path, env={"GITHUB_TOKEN": "test-token", "LARK_BOT_WEBHOOK": "https://example.com/hook"})
+    assert unsigned.notify.lark_bot.webhook == "https://example.com/hook"
+    assert unsigned.notify.lark_bot.secret == ""
+    assert unsigned.required_missing_env == ()
+
+
+def test_load_config_reads_dotenv_file(tmp_path: Path) -> None:
+    """v1.1 修复：.env 会被自动读取（真实环境变量优先）。"""
+
+    (tmp_path / ".env").write_text(
+        "# 注释行\nSMTP_USERNAME=me@example.com\nSMTP_PASSWORD='授权码'\nexport SMTP_EXTRA=1\n",
+        encoding="utf-8",
+    )
+    text = config_text(tmp_path).replace(
+        "  email:\n    enabled: false",
+        "  email:\n    enabled: true\n    host: smtp.example.com\n    sender: me@example.com\n"
+        "    username: ${SMTP_USERNAME}\n    password: ${SMTP_PASSWORD}\n    recipients: [leader@example.com]",
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    loaded = load_config(path, env=None, cwd=tmp_path)
+
+    assert loaded.notify.email.username == "me@example.com"
+    assert loaded.notify.email.password == "授权码"
+    # 只有未在 .env 里提供的 GITHUB_TOKEN 算缺失；SMTP 两个值已从 .env 读到
+    assert loaded.missing_env == ("GITHUB_TOKEN",)
+    assert loaded.required_missing_env == ()
+
+
+def test_dotenv_empty_value_is_reported_missing(tmp_path: Path) -> None:
+    """占位符在 .env 里是空值时，仍应被 --check 报出来。"""
+
+    (tmp_path / ".env").write_text("SMTP_USERNAME=me@example.com\nSMTP_PASSWORD=\n", encoding="utf-8")
+    text = config_text(tmp_path).replace(
+        "  email:\n    enabled: false",
+        "  email:\n    enabled: true\n    host: smtp.example.com\n    sender: me@example.com\n"
+        "    username: ${SMTP_USERNAME}\n    password: ${SMTP_PASSWORD}\n    recipients: [leader@example.com]",
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    loaded = load_config(path, env=None, cwd=tmp_path)
+
+    assert "SMTP_PASSWORD" in loaded.missing_env
+    assert loaded.required_missing_env == ("SMTP_PASSWORD",)
+
+
+def test_dotenv_with_bom_is_parsed(tmp_path: Path) -> None:
+    """记事本保存 .env 时可能带 BOM，第一行的键不能被读坏。"""
+
+    (tmp_path / ".env").write_bytes(
+        "\ufeffSMTP_USERNAME=me@example.com\nSMTP_PASSWORD=secret\n".encode("utf-8")
+    )
+    text = config_text(tmp_path).replace(
+        "  email:\n    enabled: false",
+        "  email:\n    enabled: true\n    host: smtp.example.com\n    sender: me@example.com\n"
+        "    username: ${SMTP_USERNAME}\n    password: ${SMTP_PASSWORD}\n    recipients: [leader@example.com]",
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    loaded = load_config(path, env=None, cwd=tmp_path)
+
+    assert loaded.notify.email.username == "me@example.com"
+    assert loaded.notify.email.password == "secret"
+
+
 def test_load_config_missing_required_block(tmp_path: Path) -> None:
     path = tmp_path / "bad.yaml"
     path.write_text("team:\n  name: X\n", encoding="utf-8")
