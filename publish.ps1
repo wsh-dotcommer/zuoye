@@ -94,8 +94,17 @@ if ($LASTEXITCODE -eq 0) {
 Info "[4/5] 推送到 $Remote（首次会弹出 GitHub 登录）"
 git push -u origin $Branch
 if ($LASTEXITCODE -ne 0) {
-    Warn "[失败] 推送未成功。常见原因：没有登录 GitHub、或没有仓库写权限。"
-    Warn "  在浏览器登录 wsh-dotcommer 账号后重试 .\publish.ps1 即可。"
+    Warn "[失败] 推送未成功。请按报错内容对照下面两类原因："
+    Warn "  A. 报错含 'Could not connect' / 'Failed to connect' —— 网络连不上 github.com"
+    Warn "     判断：浏览器能打开 GitHub 就说明是 git 没走代理（git 不读系统代理）"
+    Warn "     办法1：给 git 配代理（端口换成你代理软件的 HTTP 端口）"
+    Warn "       git config --global http.proxy http://127.0.0.1:7890"
+    Warn "       git config --global https.proxy http://127.0.0.1:7890"
+    Warn "     办法2：改用 GitHub Desktop / VS Code 推送（它们走系统代理）"
+    Warn "     办法3：换网络（手机热点常可直接连通）"
+    Warn "  B. 报错含 'Authentication failed' / '403' / 'Permission denied' —— 账号或权限问题"
+    Warn "     用 wsh-dotcommer 账号登录后重跑 .\publish.ps1 即可"
+    Warn "  提示：本地提交已经完成，修好网络后重跑本脚本不会重复提交。"
     exit 1
 }
 Ok "    推送成功"
