@@ -3,129 +3,327 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f6f4">
   <title>智能日报</title>
-  <style>:root {
-  --bg: #f6f4ef;
-  --card: #ffffff;
-  --ink: #1f2a24;
-  --muted: #6b7a71;
-  --line: #e2ded4;
-  --accent: #1f6f54;
-  --warn: #a8431f;
+  <style>/* 智能日报 · 站点与邮件共用样式。
+   视觉体系对齐 Product Design 原型「日报工作台」：
+   冷灰底 + 墨绿强调 + 衬线大标题 + 面板卡片 + 虚线空状态。 */
+
+:root {
+  color-scheme: light;
+  --page: #f3f6f4;
+  --surface: #ffffff;
+  --surface-soft: #f8faf9;
+  --ink: #1d2925;
+  --ink-soft: #53625c;
+  --ink-muted: #697770;
+  --line: #dce5e0;
+  --line-strong: #c9d6cf;
+  --accent: #176b5b;
+  --accent-hover: #105749;
+  --accent-soft: #e7f3ee;
+  --danger: #a53939;
+  --danger-soft: #fff1ef;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --shadow-panel: 0 18px 52px rgba(33, 60, 49, .07);
+  --ease-out: cubic-bezier(.2, .75, .25, 1);
 }
 
 * { box-sizing: border-box; }
 
 body {
+  min-width: 320px;
   margin: 0;
-  padding: 24px 16px 48px;
-  background: var(--bg);
+  background: var(--page);
   color: var(--ink);
-  font-family: &#34;Microsoft YaHei&#34;, &#34;PingFang SC&#34;, &#34;Helvetica Neue&#34;, Arial, sans-serif;
-  line-height: 1.7;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 15px;
+  line-height: 1.7;
 }
 
-.page { max-width: 760px; margin: 0 auto; }
+h1, h2, h3, p { margin-top: 0; }
 
-.header {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 20px 22px;
-  margin-bottom: 18px;
-}
-
-.header h1 { margin: 0 0 8px; font-size: 22px; }
-.meta { margin: 0; color: var(--muted); font-size: 13px; }
-
-.summary { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 14px 0 0; }
-.summary li {
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  color: var(--muted);
-}
-.summary li.ok { color: var(--accent); border-color: #cfe3d9; background: #f1f8f4; }
-.summary li.failed { color: var(--warn); border-color: #ebd3c8; background: #fdf4f0; }
-
-.member {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 18px 22px;
-  margin-bottom: 16px;
-}
-
-.member h2 { margin: 0 0 4px; font-size: 17px; }
-.username { color: var(--muted); font-weight: 400; font-size: 13px; }
-
-.block { margin-top: 14px; }
-.block h3 {
-  margin: 0 0 6px;
-  font-size: 14px;
-  color: var(--accent);
-  border-left: 3px solid var(--accent);
-  padding-left: 8px;
-}
-.block ul { margin: 0; padding-left: 20px; }
-.block li { margin: 2px 0; }
-
-.empty, .failed-note { margin: 0; color: var(--muted); font-size: 13px; }
-.failed-note { color: var(--warn); }
-
-.entries { list-style: none; padding: 0; margin: 0; }
-.entries li { margin-bottom: 10px; }
-.entry {
+/* 页头 */
+.app-header { border-bottom: 1px solid var(--line); background: var(--surface); }
+.header-inner {
+  width: min(1040px, calc(100% - 64px));
+  min-height: 72px;
+  margin: 0 auto;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 14px 18px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  color: var(--ink);
-  text-decoration: none;
+  gap: 20px;
 }
-.entry:hover { border-color: var(--accent); }
-.entry .date { font-weight: 600; }
-.entry .info { color: var(--muted); font-size: 13px; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+}
+.brand-name { font-size: 15px; font-weight: 680; letter-spacing: .02em; }
+.brand-context { display: block; margin-top: -2px; color: var(--ink-muted); font-size: 12px; }
+.local-note { display: flex; align-items: center; gap: 9px; color: var(--ink-soft); font-size: 13px; }
+.local-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: #3b8a71;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 
-.back { text-align: center; margin-top: 22px; }
-.back a { color: var(--accent); text-decoration: none; font-size: 13px; }
+/* 页体与标题 */
+.page { width: min(1040px, calc(100% - 64px)); margin: 0 auto; padding: 52px 0 48px; }
+.page-intro { max-width: 720px; margin-bottom: 30px; }
+.eyebrow {
+  margin: 0 0 10px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 720;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+h1 {
+  margin-bottom: 12px;
+  font-family: "Songti SC", "STSong", SimSun, "Noto Serif CJK SC", serif;
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 600;
+  letter-spacing: .015em;
+  line-height: 1.25;
+}
+.intro-copy { max-width: 62ch; margin-bottom: 0; color: var(--ink-soft); font-size: 15px; line-height: 1.75; }
 
-.footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 26px; }
+/* 面板 */
+.panel {
+  margin-top: 20px;
+  padding: clamp(22px, 3vw, 36px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+}
+.panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.panel-kicker { margin: 0 0 5px; color: var(--ink-muted); font-size: 12px; font-weight: 650; letter-spacing: .08em; }
+h2 { margin-bottom: 0; font-size: 19px; font-weight: 700; line-height: 1.4; }
+.username { margin-left: 8px; color: var(--ink-muted); font-size: 13px; font-weight: 400; }
+.avatar {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+.note-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 640;
+  white-space: nowrap;
+}
+.note-chip .local-dot { box-shadow: none; }
 
-@media (max-width: 520px) {
-  body { padding: 16px 10px 32px; font-size: 14px; }
-  .header, .member { padding: 16px; }
-  .header h1 { font-size: 19px; }
+/* 数据源徽章 */
+.chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 16px 0 0; }
+.chips li {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+  font-size: 12.5px;
+}
+.chips li.ok { border-color: #cfe3d9; background: var(--accent-soft); color: var(--accent); }
+.chips li.failed { border-color: #e3b7b2; background: var(--danger-soft); color: var(--danger); }
+
+/* 成员板块 */
+.block { margin-top: 18px; padding-top: 18px; border-top: 1px solid #edf1ee; }
+.block:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+.block-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+h3 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .01em; }
+.block-meta { margin-left: auto; color: var(--ink-muted); font-size: 12px; }
+.lines { margin: 0; padding-left: 20px; }
+.lines li { margin: 4px 0; }
+.empty-box, .failed-box {
+  margin: 0;
+  padding: 20px 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.failed-box { border-color: #e3b7b2; background: var(--danger-soft); color: var(--danger); }
+
+/* 索引页列表 */
+.history-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.history-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 180ms var(--ease-out), background-color 180ms var(--ease-out);
+}
+.history-item:hover { border-color: var(--line-strong); background: var(--surface); }
+.history-info { display: grid; gap: 4px; min-width: 0; }
+.history-date { color: var(--ink); font-size: 16px; font-weight: 680; }
+.history-meta { color: var(--ink-muted); font-size: 12.5px; }
+.history-actions { display: flex; align-items: center; gap: 12px; }
+.history-empty {
+  margin: 0;
+  padding: 28px 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.65;
+  text-align: center;
+}
+
+/* 按钮 */
+.button {
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 680;
+  text-decoration: none;
+  transition: background-color 180ms var(--ease-out), border-color 180ms var(--ease-out), transform 180ms var(--ease-out);
+}
+.button-primary { background: var(--accent); color: #fff; }
+.button-secondary { border-color: var(--line-strong); background: var(--surface); color: var(--ink-soft); }
+.button-secondary:hover { border-color: #9db1a6; background: #f8fbf9; }
+.button-small { min-height: 38px; padding: 0 13px; font-size: 13px; }
+
+.back-link { margin: 24px 0 0; text-align: center; }
+.footer {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (hover: hover) {
+  .button-secondary:hover { transform: translateY(-1px); }
+}
+
+@media (max-width: 1024px) {
+  .header-inner, .page { width: calc(100% - 48px); }
+  .page { padding-top: 40px; }
+}
+
+@media (max-width: 600px) {
+  .header-inner, .page { width: calc(100% - 32px); }
+  .header-inner { min-height: 64px; }
+  .brand-context { display: none; }
+  .local-note { max-width: 142px; font-size: 11.5px; line-height: 1.35; }
+  h1 { font-size: 26px; }
+  .page { padding: 32px 0 36px; }
+  .panel { padding: 20px 16px; border-radius: var(--radius-md); }
+  .panel-heading { margin-bottom: 18px; }
+  .history-item { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .history-actions { width: 100%; justify-content: space-between; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 </style>
 </head>
 <body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand" aria-label="智能日报">
+        <span class="brand-mark" aria-hidden="true">日</span>
+        <div>
+          <div class="brand-name">智能日报</div>
+          <span class="brand-context">由 GitHub 数据自动生成</span>
+        </div>
+      </div>
+      <div class="local-note"><span class="local-dot" aria-hidden="true"></span><span>只读快照 · 2026-09-30 11:34</span></div>
+    </div>
+  </header>
   <main class="page">
-    <header class="header">
-      <h1>智能日报</h1>
-      <p class="meta">红豆的研发团队 · 共 2 期日报</p>
-    </header>
-    <ul class="entries">
-      <li>
-        <a class="entry" href="daily-report-2026-09-26.html">
-          <span class="date">2026-09-26</span>
-          <span class="info">1 名成员 · 生成于 2026-09-26 18:40</span>
-        </a>
-      </li>
-      <li>
-        <a class="entry" href="daily-report-2026-09-25.html">
-          <span class="date">2026-09-25</span>
-          <span class="info">1 名成员 · 生成于 2026-09-26 15:05</span>
-        </a>
-      </li>
-    </ul>
-    <footer class="footer">由智能日报生成器生成 · 2026-09-26 18:40</footer>
+    <section class="page-intro">
+      <p class="eyebrow">Daily report archive</p>
+      <h1>每一期的日报，都在这里。</h1>
+      <p class="intro-copy">红豆的研发团队 · 共 2 期日报 · 点击任意一期查看当天详情</p>
+    </section>
+    <section class="panel">
+      <div class="panel-heading">
+        <div>
+          <p class="panel-kicker">Archive · 日报存档</p>
+          <h2>历史日报</h2>
+        </div>
+        <span class="note-chip"><span class="local-dot" aria-hidden="true"></span>按日期倒序</span>
+      </div>
+      <ul class="history-list">
+        <li>
+          <a class="history-item" href="daily-report-2026-09-26.html">
+            <span class="history-info">
+              <span class="history-date">2026-09-26</span>
+              <span class="history-meta">1 名成员</span>
+            </span>
+            <span class="history-actions">
+              <span class="history-meta">生成于 2026-09-30 11:34</span>
+              <span class="button button-secondary button-small">查看</span>
+            </span>
+          </a>
+        </li>
+        <li>
+          <a class="history-item" href="daily-report-2026-09-25.html">
+            <span class="history-info">
+              <span class="history-date">2026-09-25</span>
+              <span class="history-meta">1 名成员</span>
+            </span>
+            <span class="history-actions">
+              <span class="history-meta">生成于 2026-09-26 15:05</span>
+              <span class="button button-secondary button-small">查看</span>
+            </span>
+          </a>
+        </li>
+      </ul>
+    </section>
+    <footer class="footer">由智能日报生成器生成 · 2026-09-30 11:34</footer>
   </main>
 </body>
 </html>
