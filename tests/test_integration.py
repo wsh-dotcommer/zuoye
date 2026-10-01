@@ -139,6 +139,15 @@ def test_full_pipeline_generates_report_and_site(tmp_path: Path, monkeypatch) ->
     assert (tmp_path / "docs" / "assets" / "style.css").exists()
     assert (tmp_path / "docs" / ".nojekyll").exists()
 
+    # v2.0：静态站内联日报工作台（表单/复制/本地草稿），详情页带复制与载入按钮
+    assert 'id="workbench"' in index
+    assert 'id="workbench-load"' in index
+    assert f'<option value="{DAY}">' in index
+    assert f'"date": "{DAY}"' in index
+    assert 'id="report-copy"' in detail
+    assert 'id="report-load"' in detail
+    assert "### 代码提交" in detail.split('<script id="workbench-data"', 1)[1]
+
     storage_rows = (tmp_path / "data" / "reports.sqlite3")
     assert storage_rows.exists()
     log_lines = (tmp_path / "logs" / "test.jsonl").read_text(encoding="utf-8").splitlines()
@@ -160,6 +169,10 @@ def test_degraded_source_is_marked_and_others_survive(tmp_path: Path, monkeypatc
     assert "### 代码提交" in markdown
     assert "### 工时统计" in markdown
 
+    detail = (tmp_path / "docs" / f"daily-report-{DAY}.html").read_text(encoding="utf-8")
+    assert 'id="report-copy"' in detail
+    assert "数据获取失败" in detail
+
 
 def test_empty_data_shows_placeholder(tmp_path: Path, monkeypatch) -> None:
     api = FakeApi(empty=True)
@@ -173,6 +186,10 @@ def test_empty_data_shows_placeholder(tmp_path: Path, monkeypatch) -> None:
     assert markdown.count("- 今日无记录") == 6  # 2 名成员 × 3 个板块
     assert "- 0h（今日无记录）" in markdown
     assert "- 工时：团队合计 0h · 人均 0h" in markdown
+
+    index = (tmp_path / "docs" / "index.html").read_text(encoding="utf-8")
+    assert 'id="workbench"' in index
+    assert "还没有本地草稿" in index
 
 
 def test_hours_unavailable_when_commits_fail(tmp_path: Path, monkeypatch) -> None:
