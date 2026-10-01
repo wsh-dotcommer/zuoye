@@ -1,7 +1,11 @@
-"""静态日报站渲染（design.md §4.3，Task 6）。
+"""静态日报站渲染（design.md §4.3，Task 6；工作台 v2.0）。
 
 接口契约：
     render_site(report, history, site_config) -> list[Path]
+
+v2.0 起站点页面可选内联「日报工作台」：产物仍是
+`index.html`、`daily-report-<date>.html`、`assets/style.css`、`.nojekyll` 四个文件，
+脚本与 JSON 载荷内联在页面里，不新增文件、不新增后端。
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from shared.storage import HistoryEntry
 class SiteConfig:
     directory: Path
     title: str
+    workbench: bool = True
 
 
 def render_site(
@@ -41,7 +46,12 @@ def render_site(
     detail_path = directory / detail_name
     view = formatter.build_view(report)
     detail_path.write_text(
-        template.render_report_html(view, back_link=True),
+        template.render_report_html(
+            view,
+            back_link=True,
+            markdown=report.markdown,
+            interactive=site_config.workbench,
+        ),
         encoding="utf-8",
     )
 
@@ -53,6 +63,7 @@ def render_site(
             site_title=site_config.title,
             team_name=report.team_name,
             generated_at=view["generated_at"],
+            interactive=site_config.workbench,
         ),
         encoding="utf-8",
     )
@@ -92,6 +103,7 @@ def _merge_entries(
                 "site_file": entry.site_file,
                 "member_count": entry.member_count,
                 "generated_at": entry.generated_at.strftime("%Y-%m-%d %H:%M"),
+                "markdown": entry.markdown,
             }
         )
     return entries
