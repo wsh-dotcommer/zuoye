@@ -84,6 +84,7 @@ class ReportConfig:
     log_path: Path
     skip_weekends: bool = True
     holidays: tuple[date, ...] = ()
+    workbench: bool = True
 
 
 @dataclass(frozen=True)
@@ -213,6 +214,7 @@ def load_config(
         log_path=Path(str(report_raw.get("log_path", "logs/daily-report.jsonl"))),
         skip_weekends=bool(report_raw.get("skip_weekends", True)),
         holidays=_parse_holidays(report_raw.get("holidays")),
+        workbench=bool(report_raw.get("workbench", True)),
     )
 
     hours = _parse_hours(resolved.get("hours"))
