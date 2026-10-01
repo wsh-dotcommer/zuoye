@@ -113,7 +113,11 @@ def _run_pipeline(config: Config, args: argparse.Namespace, logger: JsonLineLogg
     site_paths = render_site(
         report,
         history,
-        SiteConfig(directory=Path(config.report.site_dir), title=config.report.site_title),
+        SiteConfig(
+            directory=Path(config.report.site_dir),
+            title=config.report.site_title,
+            workbench=config.report.workbench,
+        ),
     )
     logger.info("site_rendered", files=[str(path) for path in site_paths], entries=len(history))
 

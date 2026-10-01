@@ -43,6 +43,7 @@ report:
   output_dir: output                 # Markdown / HTML 日报输出目录
   site_dir: docs                     # 静态日报站输出目录（GitHub Pages 发布 main 分支 /docs）
   site_title: 智能日报
+  workbench: true                    # true → 站点页内联「日报工作台」（v2.0）；false → 退回纯只读站
   storage_path: data/reports.sqlite3
   log_path: logs/daily-report.jsonl
   skip_weekends: true

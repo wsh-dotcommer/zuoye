@@ -82,6 +82,36 @@ notify:
 - `data/reports.sqlite3`：日报历史（按日期幂等覆盖）
 - `logs/daily-report.jsonl`：JSON Lines 执行日志（开始时间、各数据源条数、推送结果、结束时间）
 
+> v2.0 起索引页与详情页内联了「日报工作台」脚本与数据，产物仍是上面这四个文件，没有新增
+> 任何服务端接口；页面本身也不联网（详见下一节）。
+
+## 日报工作台（v2.0）
+
+索引页顶部多了一个工作台，用来把"自动日报之外的部分"补起来；日报详情页顶部多了两个按钮。
+
+| 在哪里 | 能做什么 |
+| --- | --- |
+| 索引页 · Step 01 | 填日报日期、今日完成（必填）、明日计划、需要协助；也可以"从自动日报载入"某一期再改 |
+| 索引页 · Step 02 | 生成一份 Markdown 日报，内容可自由编辑，点「复制日报」直接粘贴到飞书/邮件 |
+| 索引页 · Step 03 | 生成的草稿自动存在本机浏览器，可载入、复制、删除单条或清空全部（最多 50 条） |
+| 日报详情页 | 「复制 Markdown」复制这一期的自动日报原文；「载入到工作台」把它送进索引页编辑框继续改 |
+
+手写日报的格式固定为 `# 工作日报 · 日期` + `## 今日完成 / ## 明日计划 / ## 需要协助`，
+留空的小节写「未填写」，不会替你猜测内容。
+
+三个必须知道的边界：
+
+- **内容不会上传**：填写的东西只存在你自己浏览器的 localStorage，不写回 GitHub、不进数据库、不会推送到飞书或邮箱。换台电脑或换个浏览器就看不到。
+- **页面不联网**：工作台不请求 GitHub、不新增接口、不引入第三方脚本，所以"点一下生成当天真实数据"做不到——真实数据仍然只能由 `main.py` 在本地采集。
+- **脚本/存储不可用时自动退化**：禁用 JavaScript 时页面就是原来的只读日报站；隐私模式下仍能生成与复制，只是提示"草稿只在本次会话内有效"。
+
+不想要这个工作台？把 `config.yaml` 的 `report.workbench` 改成 `false` 重新生成，页面就回到 v1.x 的纯只读形态：
+
+```yaml
+report:
+  workbench: false      # 生成不含任何脚本的纯只读站点
+```
+
 ## 工时统计口径（v1.1）
 
 日报里的"工时统计"由 **GitHub 提交时间推导**（不接考勤系统、不需要成员填报），算法叫会话法：
@@ -251,13 +281,16 @@ schtasks /Create /SC WEEKLY /D MON,TUE,WED,THU,FRI /TN "daily-report" /TR "D:\co
 
 全部用例使用 Mock（`httpx.MockTransport`、假 SMTP），不访问真实网络、不发送真实通知；
 覆盖正常、降级（单源失败）、空数据、数据源全部失败四种集成场景，以及分页、限流等待、
-重试、字段完整性、敏感词过滤、站点链接等验收点。
+重试、字段完整性、敏感词过滤、站点链接、工作台载荷与渐进增强等验收点。
+
+`generator/templates/workbench.js` 是内联进页面的浏览器脚本，仓库里没有 npm 工程，
+因此用 `node --check generator/templates/workbench.js` 做语法校验，行为验证在浏览器里手测。
 
 ## 目录
 
 - `specs/`：三份规范（需求 / 架构 / 任务）
 - `collector/`：`github_commit.py`、`github_issue.py`、`github_discussion.py`
-- `generator/`：`formatter.py`（日报编排）、`hours.py`（工时推导，v1.1）、`template.py`（Jinja2 模板）、`site.py`（静态站）
+- `generator/`：`formatter.py`（日报编排）、`hours.py`（工时推导，v1.1）、`template.py`（Jinja2 模板）、`site.py`（静态站）、`templates/`（页面与邮件模板、样式、工作台脚本）
 - `notifier/`：`email.py`（SMTP）、`lark_bot.py`（群机器人 Webhook）
 - `shared/`：`config.py`、`logger.py`、`errors.py`、`http.py`、`filters.py`、`models.py`、`storage.py`
 - `main.py`：编排入口
