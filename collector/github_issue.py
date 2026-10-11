@@ -64,6 +64,10 @@ def collect(config: Config, start: datetime, end: datetime) -> list[TaskRecord]:
                         status_from=status_from,
                         status_to=status_to,
                         updated_at=moment,
+                        number=int(issue.get("number") or 0),
+                        url=str(issue.get("html_url") or ""),
+                        labels=_labels(issue),
+                        comment_count=int(issue.get("comments") or 0),
                     )
                 )
     return records
@@ -162,3 +166,16 @@ def _resolve_assignee(issue: dict, actor: str) -> str:
     if assigned:
         return assigned
     return actor or str((issue.get("user") or {}).get("login", ""))
+
+
+def _labels(issue: dict) -> tuple[str, ...]:
+    """Issue 标签：新式 API 返回对象数组，旧式返回字符串数组，两种都要认。"""
+
+    raw = issue.get("labels") or []
+    names = []
+    for item in raw:
+        name = item.get("name") if isinstance(item, dict) else item
+        text = str(name or "").strip()
+        if text:
+            names.append(text)
+    return tuple(names)

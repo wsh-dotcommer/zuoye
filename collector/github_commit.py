@@ -85,6 +85,8 @@ def collect(config: Config, start: datetime, end: datetime) -> list[CommitRecord
                         deletions=deletions,
                         files_changed=files_changed,
                         files=files,
+                        sha=str(item.get("sha") or ""),
+                        url=str(item.get("html_url") or ""),
                     )
                 )
     if bots_skipped:

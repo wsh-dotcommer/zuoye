@@ -102,6 +102,7 @@ def _collect_endpoint(
                 content=content,
                 timestamp=timestamp,
                 source=source_builder(repo, comment),
+                url=str(comment.get("html_url") or ""),
             )
         )
     if skipped:
