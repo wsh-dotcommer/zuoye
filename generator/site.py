@@ -17,6 +17,15 @@ from generator import formatter, template
 from shared.models import DailyReport
 from shared.storage import HistoryEntry
 
+# 索引页趋势区块（v2.3）：内联 SVG，不引图表库、不发请求
+TREND_LIMIT = 7
+TREND_MIN_POINTS = 2
+TREND_BAR_WIDTH = 16
+TREND_GAP = 12
+TREND_HEIGHT = 96
+TREND_TOP = 14
+TREND_BOTTOM = 22
+
 
 @dataclass(frozen=True)
 class SiteConfig:
@@ -64,6 +73,7 @@ def render_site(
             team_name=report.team_name,
             generated_at=view["generated_at"],
             interactive=site_config.workbench,
+            trend=build_trend(history),
         ),
         encoding="utf-8",
     )
@@ -72,6 +82,65 @@ def render_site(
 
 def detail_file_name(day) -> str:
     return f"daily-report-{day.isoformat()}.html"
+
+
+def build_trend(history: list[HistoryEntry], *, limit: int = TREND_LIMIT) -> dict | None:
+    """近 N 期趋势（v2.3）：只取有结构化统计的那几期。
+
+    少于两期（单点看不出趋势）或全为 0 时返回 None，索引页就不渲染该区块。
+    """
+
+    entries = [entry for entry in history if entry.to_stats() is not None]
+    entries.sort(key=lambda item: item.date)
+    entries = entries[-limit:]
+    if len(entries) < TREND_MIN_POINTS:
+        return None
+    series = [entry.to_stats() for entry in entries]
+    commits = [item.commit_count for item in series]
+    hours = [item.total_hours for item in series]
+    if not any(commits) and not any(hours):
+        return None
+    labels = [item.date.strftime("%m-%d") for item in series]
+    return {
+        "count": len(series),
+        "commits": _chart(commits, labels),
+        "hours": _chart(hours, labels),
+    }
+
+
+def _chart(values: list[float], labels: list[str]) -> dict:
+    """把一串数值算成 SVG 柱子的坐标（几何在这里算好，模板只负责画）。"""
+
+    peak = max(values) if values else 0
+    plot = TREND_HEIGHT - TREND_TOP - TREND_BOTTOM
+    base = TREND_HEIGHT - TREND_BOTTOM
+    bars: list[dict] = []
+    for index, (value, label) in enumerate(zip(values, labels)):
+        height = 0 if value <= 0 or peak <= 0 else max(2, round(value / peak * plot))
+        x = TREND_GAP + index * (TREND_BAR_WIDTH + TREND_GAP)
+        bars.append(
+            {
+                "x": x,
+                "y": base - height,
+                "width": TREND_BAR_WIDTH,
+                "height": height,
+                "label_x": x + TREND_BAR_WIDTH / 2,
+                "value_y": base - height - 4,
+                "label_y": TREND_HEIGHT - 6,
+                "label": label,
+                "value": _format_value(value),
+            }
+        )
+    return {
+        "width": TREND_GAP + len(values) * (TREND_BAR_WIDTH + TREND_GAP),
+        "height": TREND_HEIGHT,
+        "bars": bars,
+    }
+
+
+def _format_value(value: float) -> str:
+    text = f"{value:.2f}".rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def _merge_entries(

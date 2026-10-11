@@ -18,10 +18,12 @@ from shared.models import (
     SOURCE_DISCUSSION,
     SOURCE_ISSUE,
     HOURS_EMPTY,
+    ChatSummaryRecord,
     CommitRecord,
     DailyReport,
     MemberReport,
     MessageRecord,
+    ReportStats,
     SourceStatus,
     TaskRecord,
     WORK_HOURS_NOTE,
@@ -29,6 +31,10 @@ from shared.models import (
 
 CONTENT_PREVIEW_LIMIT = 140
 COMMIT_FILE_LIMIT = 10
+SHA_LENGTH = 7
+TREND_POINTS = 7
+TREND_MIN_POINTS = 2
+SPARK_BARS = "▁▂▃▄▅▆▇█"
 EMPTY_NOTE = "今日无记录"
 FAILED_LABEL = "数据获取失败"
 
@@ -57,8 +63,15 @@ def generate(
     *,
     timezone_name: str = "Asia/Shanghai",
     hours_rules: hours_module.HoursRules | None = None,
+    recent: Sequence[ReportStats] = (),
+    chat_summaries: Sequence[ChatSummaryRecord] = (),
 ) -> DailyReport:
-    """按成员聚合记录，产出 Markdown 与 HTML 双形态日报。"""
+    """按成员聚合记录，产出 Markdown 与 HTML 双形态日报。
+
+    `recent`（v2.3）为最近几期已保存日报的结构化统计（升序、不含当日），
+    用于头部「对比上期」与「近 N 期」两行；`chat_summaries`（v2.3）为飞书群汇总。
+    两者都是仅关键字参数且带默认值，旧调用无需改动。
+    """
 
     member_list = list(members)
     rules = hours_rules or hours_module.HoursRules()
@@ -76,6 +89,12 @@ def generate(
         source_statuses=list(source_statuses),
         total_hours=round(sum(item.hours for item in work_hours.values()), 2),
         member_count=len(member_reports),
+        commit_count=len(commits),
+        task_count=len(tasks),
+        message_count=len(messages),
+        chat_message_count=sum(item.message_count for item in chat_summaries),
+        recent_stats=list(recent),
+        chat_summaries=list(chat_summaries),
     )
     view = build_view(report)
     report.markdown = render_markdown(view)
@@ -88,12 +107,16 @@ def build_view(report: DailyReport) -> dict:
 
     statuses = {status.name: status for status in report.source_statuses}
     hours_enabled = any(member.work_hours is not None for member in report.members)
+    single_member = len(report.members) == 1
     return {
         "title": f"智能日报 · {report.date.isoformat()}",
         "date": report.date.isoformat(),
         "team_name": report.team_name,
+        "team_label": _team_label(report, single_member),
+        "single_member": single_member,
         "generated_at": _format_moment(report.generated_at),
         "hours_summary": _hours_summary(report) if hours_enabled else None,
+        "extra_lines": _extra_lines(report),
         "source_summary": [
             {
                 "label": status.label,
@@ -119,7 +142,7 @@ def _member_sections(member: MemberReport, statuses: dict) -> list[dict]:
 
     sections = [
         _section("commits", _commit_items(member.commits), statuses.get(SOURCE_COMMIT)),
-        _section("tasks", _task_items(member.tasks), statuses.get(SOURCE_ISSUE)),
+        _section("tasks", _task_items(member.tasks, member), statuses.get(SOURCE_ISSUE)),
     ]
     hours_section = _hours_section(member)
     if hours_section is not None:
@@ -134,13 +157,111 @@ def _member_sections(member: MemberReport, statuses: dict) -> list[dict]:
     return sections
 
 
+def _team_label(report: DailyReport, single_member: bool) -> str:
+    """头部「- 团队：」的取值（v2.2）：单人团队时并入成员身份，避免与成员标题重复。"""
+
+    if not single_member:
+        return report.team_name
+    username = (report.members[0].github_username or "").strip()
+    if not username:
+        return report.team_name
+    return f"{report.team_name}（@{username}）"
+
+
+def _extra_lines(report: DailyReport) -> list[str]:
+    """头部补充行（v2.3）：飞书群汇总 → 对比上期 → 近 N 期趋势，空行不出现。"""
+
+    lines: list[str] = []
+    chat = _chat_line(report.chat_summaries)
+    if chat:
+        lines.append(chat)
+    comparison = _comparison_line(report.recent_stats, report)
+    if comparison:
+        lines.append(comparison)
+    trend = _trend_line(report.recent_stats, report)
+    if trend:
+        lines.append(trend)
+    return lines
+
+
+def _chat_line(summaries: Sequence[ChatSummaryRecord]) -> str:
+    if not summaries:
+        return ""
+    parts = [
+        f"{item.chat_name} {item.message_count} 条 · {item.speaker_count} 人发言"
+        for item in summaries
+    ]
+    return "飞书群：" + "；".join(parts)
+
+
+def _comparison_line(recent: Sequence[ReportStats], report: DailyReport) -> str:
+    """与"上一期已保存的日报"对比（v2.3）；无历史时整行不出现。"""
+
+    baseline = recent[-1] if recent else None
+    if baseline is None or baseline.date >= report.date:
+        return ""
+    parts = [
+        f"提交 {_delta_text(report.commit_count - baseline.commit_count)}",
+        f"任务 {_delta_text(report.task_count - baseline.task_count)}",
+        f"沟通 {_delta_text(report.message_count - baseline.message_count)}",
+        f"工时 {_delta_text(report.total_hours - baseline.total_hours, unit='h')}",
+    ]
+    return f"对比上期（{baseline.date.isoformat()}）：" + " · ".join(parts)
+
+
+def _trend_line(recent: Sequence[ReportStats], report: DailyReport) -> str:
+    """近 N 期（含当日）的迷你趋势；不足两期不显示（单点看不出趋势）。"""
+
+    series = [item for item in recent if item.date < report.date]
+    series.append(_stats_of(report))
+    series = series[-TREND_POINTS:]
+    if len(series) < TREND_MIN_POINTS:
+        return ""
+    commits = [item.commit_count for item in series]
+    hours = [item.total_hours for item in series]
+    return (
+        f"近 {len(series)} 期：提交 {_sparkline(commits)}（{sum(commits)} 条）"
+        f" · 工时 {_sparkline(hours)}（{_format_hours(sum(hours))}h）"
+    )
+
+
+def _stats_of(report: DailyReport) -> ReportStats:
+    return ReportStats(
+        date=report.date,
+        commit_count=report.commit_count,
+        task_count=report.task_count,
+        message_count=report.message_count,
+        chat_message_count=report.chat_message_count,
+        total_hours=report.total_hours,
+    )
+
+
+def _sparkline(values: Sequence[float]) -> str:
+    """把一串数值归一化成 8 档块字符；全 0 时统一最低档，不虚高。"""
+
+    if not values:
+        return ""
+    peak = max(values)
+    top = len(SPARK_BARS) - 1
+    if peak <= 0:
+        return SPARK_BARS[0] * len(values)
+    return "".join(SPARK_BARS[min(top, round(value / peak * top))] for value in values)
+
+
+def _delta_text(value: float, *, unit: str = "") -> str:
+    if abs(value) < 1e-9:
+        return f"±0{unit}"
+    sign = "+" if value > 0 else "-"
+    return f"{sign}{_format_hours(abs(value))}{unit}"
+
+
 def render_markdown(view: dict) -> str:
     """渲染 Markdown 版本日报。"""
 
     lines = [
         f"# {view['title']}",
         "",
-        f"- 团队：{view['team_name']}",
+        f"- 团队：{view.get('team_label') or view['team_name']}",
         f"- 生成时间：{view['generated_at']}",
         "- 数据源：" + " · ".join(_source_summary_line(item) for item in view["source_summary"]),
     ]
@@ -149,14 +270,17 @@ def render_markdown(view: dict) -> str:
         lines.append(
             f"- 工时：团队合计 {summary['total']}h · 人均 {summary['average']}h（{WORK_HOURS_NOTE}）"
         )
+    lines.extend(f"- {line}" for line in view.get("extra_lines") or [])
     lines.append("")
     if not view["members"]:
         lines.append("（没有可输出的成员段落）")
         return "\n".join(lines).rstrip() + "\n"
 
     for member in view["members"]:
-        lines.append(f"## {member['name']}（{member['github_username']}）")
-        lines.append("")
+        if not view.get("single_member"):
+            # 单人团队：身份已写进头部"- 团队：姓名（@username）"，不再重复成员标题
+            lines.append(f"## {member['name']}（{member['github_username']}）")
+            lines.append("")
         for section in member["sections"]:
             lines.append(f"### {section['title']}")
             if section["state"] == "ok":
@@ -298,9 +422,20 @@ def _format_hours(value: float) -> str:
 
 def _commit_items(commits: Sequence[CommitRecord]) -> list[str]:
     return [
-        f"- `{record.repo}` {record.message or '(无提交信息)'}{_commit_stats(record)}"
+        f"- `{record.repo}` {_commit_link(record)}{record.message or '(无提交信息)'}{_commit_stats(record)}"
         for record in commits
     ]
+
+
+def _commit_link(record: CommitRecord) -> str:
+    """提交短号 + 链接；SHA 缺失时整段省略，不留空壳。"""
+
+    short = (record.sha or "").strip()[:SHA_LENGTH]
+    if not short:
+        return ""
+    if record.url:
+        return f"[{short}]({record.url}) "
+    return f"{short} "
 
 
 def _commit_stats(record: CommitRecord) -> str:
@@ -318,12 +453,50 @@ def _commit_stats(record: CommitRecord) -> str:
     return summary + "）"
 
 
-def _task_items(tasks: Sequence[TaskRecord]) -> list[str]:
-    return [f"- {record.title or '(无标题)'}：{record.status_from} → {record.status_to}" for record in tasks]
+def _task_items(tasks: Sequence[TaskRecord], member: MemberReport) -> list[str]:
+    return [
+        f"- {_task_headline(record)}{_task_context(record, member)}" for record in tasks
+    ]
+
+
+def _task_headline(record: TaskRecord) -> str:
+    """任务行的标题段：优先 `[#编号](链接)`，缺链接时退回纯编号/纯标题。"""
+
+    prefix = ""
+    if record.number:
+        prefix = f"[#{record.number}]({record.url}) " if record.url else f"#{record.number} "
+    return f"{prefix}{record.title or '(无标题)'}：{record.status_from} → {record.status_to}"
+
+
+def _task_context(record: TaskRecord, member: MemberReport) -> str:
+    """任务行的括号补充：标签 / 指派 / 评论数；空片段整体不出现。
+
+    指派人与本段成员一致时不显示——日报按人聚合，写自己名字是噪音。
+    """
+
+    parts: list[str] = []
+    if record.labels:
+        parts.append("标签：" + "、".join(record.labels))
+    assignee = (record.assignee or "").strip()
+    if assignee and assignee.lower() != (member.github_username or "").strip().lower():
+        parts.append(f"指派：{assignee}")
+    if record.comment_count > 0:
+        parts.append(f"{record.comment_count} 条评论")
+    return f"（{' · '.join(parts)}）" if parts else ""
 
 
 def _message_items(messages: Sequence[MessageRecord]) -> list[str]:
-    return [f"- [{record.source}] {record.sender}：{_preview(record.content)}" for record in messages]
+    return [
+        f"- {_message_source(record)} {record.sender}：{_preview(record.content)}"
+        for record in messages
+    ]
+
+
+def _message_source(record: MessageRecord) -> str:
+    """讨论来源：有链接时输出 Markdown 链接（HTML 侧由 inline_links 过滤器转成 <a>）。"""
+
+    label = record.source or "(未知来源)"
+    return f"[{label}]({record.url})" if record.url else f"[{label}]"
 
 
 def _preview(content: str) -> str:

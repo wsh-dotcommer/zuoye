@@ -7,10 +7,13 @@
 from __future__ import annotations
 
 import json
+import re
+from html import escape
 from pathlib import Path
 from typing import Sequence
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 _env = Environment(
@@ -19,6 +22,33 @@ _env = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+
+# HTML 侧只认这一种内联链接（站点详情页与邮件正文都不做完整 Markdown 渲染）
+_LINK_PATTERN = re.compile(r"\[([^\[\]]+)\]\((https?://[^\s()<>]+)\)")
+
+
+def render_inline_links(text: str) -> Markup:
+    """把 `[文字](http(s) 链接)` 转成 `<a>`，其余片段照常转义（v2.2）。
+
+    先按片段处理再拼接：链接外的文本与锚点文字各自转义，URL 作为属性值转义，
+    既避免二次转义，也堵住属性注入。
+    """
+
+    source = str(text)
+    out: list[str] = []
+    cursor = 0
+    for match in _LINK_PATTERN.finditer(source):
+        out.append(escape(source[cursor : match.start()]))
+        out.append(
+            f'<a href="{escape(match.group(2), quote=True)}" target="_blank" rel="noopener">'
+            f"{escape(match.group(1))}</a>"
+        )
+        cursor = match.end()
+    out.append(escape(source[cursor:]))
+    return Markup("".join(out))
+
+
+_env.filters["inline_links"] = render_inline_links
 
 
 def render_report_html(
@@ -53,8 +83,9 @@ def render_index_html(
     team_name: str,
     generated_at: str,
     interactive: bool = True,
+    trend: dict | None = None,
 ) -> str:
-    """渲染静态站索引页（含工作台与历史载荷）。"""
+    """渲染静态站索引页（含工作台、历史载荷与近 N 期趋势）。"""
 
     return _env.get_template("index.html.j2").render(
         entries=entries,
@@ -64,6 +95,7 @@ def render_index_html(
         style=render_style(),
         generated_at=generated_at,
         interactive=interactive,
+        trend=trend,
         workbench_data=render_workbench_data(entries),
         workbench_js=render_workbench_js() if interactive else "",
     )
