@@ -56,6 +56,8 @@ def test_collect_returns_eight_fields(config, monkeypatch) -> None:
     assert first.timestamp == datetime(2026, 9, 18, 10, 0, tzinfo=timezone.utc)
     assert (first.additions, first.deletions, first.files_changed) == (120, 3, 4)
     assert first.files == ("file-0.py", "file-1.py", "file-2.py", "file-3.py")
+    assert first.sha == "sha-a"
+    assert first.url == "https://github.com/octo/demo/commit/sha-a"
 
 
 def test_collect_falls_back_to_email_when_login_missing(config, monkeypatch) -> None:

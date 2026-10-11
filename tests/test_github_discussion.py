@@ -43,6 +43,7 @@ def test_collect_filters_keywords_and_sensitive_words(config, monkeypatch) -> No
     assert contents == ["feat: 这个方案我同意", "fix: 建议补一个单元测试"]
     assert all(record.sender and record.source and record.timestamp for record in records)
     assert {record.source for record in records} == {"octo/demo #12", "octo/demo PR #7"}
+    assert all(record.url.startswith("https://github.com/") for record in records)
 
 
 def test_collect_returns_everything_when_keywords_empty(config, monkeypatch) -> None:

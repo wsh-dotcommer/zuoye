@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 import pytest
 
 import main as main_module
-from collector import github_commit, github_discussion, github_issue
+from collector import feishu_message, github_commit, github_discussion, github_issue
 from notifier import lark_bot
+from shared.http import FeishuClient, TOKEN_PATH
 from tests.conftest import (
     comment_item,
     commit_detail,
@@ -107,6 +109,61 @@ def _write_config_with_lark(tmp_path: Path, *, retry_times: int = 1) -> Path:
 def _patch_collectors(monkeypatch: pytest.MonkeyPatch, api: FakeApi) -> None:
     for module in (github_commit, github_issue, github_discussion):
         patch_client(monkeypatch, module, api.handler, retry_times=1)
+
+
+def _write_config_with_feishu(tmp_path: Path, *, credentials: str = "cli_demo") -> Path:
+    text = config_text(tmp_path, retry_times=1).replace(
+        "sources:\n  github:",
+        "sources:\n  feishu:\n    enabled: true\n"
+        f"    app_id: {credentials}\n    app_secret: app-secret\n"
+        "    chats:\n      - id: oc_demo\n        name: 智能日报\n  github:",
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _ms(hour: int) -> str:
+    return str(int(datetime(2026, 9, 18, hour, 0, tzinfo=timezone.utc).timestamp() * 1000))
+
+
+def _feishu_handler(*, ok: bool = True, messages: int = 3):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            if not ok:
+                return httpx.Response(403, json={"code": 99991663, "msg": "no permission"})
+            return httpx.Response(200, json={"code": 0, "tenant_access_token": "t-demo"})
+        if request.url.path == "/open-apis/im/v1/messages":
+            items = [
+                {
+                    "message_id": f"om_{index}",
+                    "msg_type": "text",
+                    "create_time": _ms(1 + index),
+                    "sender": {"id": f"ou_{index % 2}", "sender_type": "user"},
+                    "body": {"content": "群聊机密内容"},
+                }
+                for index in range(messages)
+            ]
+            return httpx.Response(200, json={"code": 0, "data": {"items": items, "has_more": False}})
+        return httpx.Response(404, json={"msg": "not found"})
+
+    return handler
+
+
+def _patch_feishu(monkeypatch: pytest.MonkeyPatch, handler) -> None:
+    def factory(config):
+        feishu = config.sources.feishu
+        return FeishuClient(
+            feishu.app_id,
+            feishu.app_secret,
+            base_url=feishu.base_url,
+            transport=httpx.MockTransport(handler),
+            retry_times=1,
+            retry_interval=0.0,
+            sleep=lambda _seconds: None,
+        )
+
+    monkeypatch.setattr(feishu_message, "build_client", factory)
 
 
 def test_full_pipeline_generates_report_and_site(tmp_path: Path, monkeypatch) -> None:
@@ -293,3 +350,55 @@ def test_history_index_accumulates_across_days(tmp_path: Path, monkeypatch) -> N
     assert f'daily-report-{second_day}.html' in index
     assert index.index(second_day) < index.index(DAY)
     assert date.fromisoformat(second_day) > date.fromisoformat(DAY)
+
+
+def test_pipeline_includes_feishu_summary_without_content(tmp_path: Path, monkeypatch) -> None:
+    api = FakeApi()
+    _patch_collectors(monkeypatch, api)
+    _patch_feishu(monkeypatch, _feishu_handler())
+    config_path = _write_config_with_feishu(tmp_path)
+
+    assert main_module.main(["--config", str(config_path), "--date", DAY, "--dry-run"]) == 0
+
+    markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
+    assert "- 飞书群：智能日报 3 条 · 2 人发言" in markdown
+    assert "飞书消息 3 条" in markdown  # 数据源徽章报的是消息总条数，不是群数量
+    assert "群聊机密内容" not in markdown  # 正文绝不落盘
+
+
+def test_pipeline_degrades_when_feishu_source_fails(tmp_path: Path, monkeypatch) -> None:
+    api = FakeApi()
+    _patch_collectors(monkeypatch, api)
+    _patch_feishu(monkeypatch, _feishu_handler(ok=False))
+    config_path = _write_config_with_feishu(tmp_path)
+
+    assert main_module.main(["--config", str(config_path), "--date", DAY, "--dry-run"]) == 0
+
+    markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
+    assert "飞书消息 数据获取失败" in markdown
+    assert "### 代码提交" in markdown  # 其它源不受影响
+
+
+def test_second_run_adds_comparison_trend_and_site_chart(tmp_path: Path, monkeypatch) -> None:
+    api = FakeApi()
+    _patch_collectors(monkeypatch, api)
+    config_path = _write_config(tmp_path)
+
+    assert main_module.main(["--config", str(config_path), "--date", "2026-09-17", "--dry-run"]) == 0
+    assert main_module.main(["--config", str(config_path), "--date", DAY, "--dry-run"]) == 0
+
+    markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
+    assert "- 对比上期（2026-09-17）：提交 +2 · 任务 +1 · 沟通 +1 · 工时 +1h" in markdown
+    assert "- 近 2 期：提交 ▁█（2 条） · 工时 ▁█（1h）" in markdown
+
+    index = (tmp_path / "docs" / "index.html").read_text(encoding="utf-8")
+    assert 'id="trend-title"' in index and "<svg" in index
+
+
+def test_check_passes_with_feishu_source(tmp_path: Path, monkeypatch) -> None:
+    api = FakeApi()
+    _patch_collectors(monkeypatch, api)
+    _patch_feishu(monkeypatch, _feishu_handler())
+    config_path = _write_config_with_feishu(tmp_path)
+
+    assert main_module.main(["--config", str(config_path), "--check"]) == 0

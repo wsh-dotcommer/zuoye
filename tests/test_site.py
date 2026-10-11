@@ -119,3 +119,56 @@ def test_generated_at_is_formatted() -> None:
     # v1.1：MemberReport 增加 work_hours 字段，这里只比较身份字段
     assert (report.members[0].name, report.members[0].github_username) == ("红豆", "wsh-dotcommer")
     assert report.date - timedelta(days=1) == date(2026, 9, 17)
+
+
+def _stats_entry(day: date, *, commits: int | None, hours: float | None) -> HistoryEntry:
+    return HistoryEntry(
+        date=day,
+        team_name="测试团队",
+        member_count=1,
+        generated_at=datetime(2026, 9, 18, 18, 0, tzinfo=timezone.utc),
+        site_file=detail_file_name(day),
+        markdown=f"# {day.isoformat()}",
+        commit_count=commits,
+        total_hours=hours,
+    )
+
+
+def test_index_renders_inline_svg_trend(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir(parents=True)
+    history = [
+        _stats_entry(date(2026, 9, 16), commits=1, hours=0.5),
+        _stats_entry(date(2026, 9, 17), commits=3, hours=1.0),
+    ]
+    for entry in history:
+        (docs / entry.site_file).write_text("<html>详情</html>", encoding="utf-8")
+
+    render_site(
+        _report(date(2026, 9, 18)),
+        history,
+        SiteConfig(directory=docs, title="测试日报", workbench=False),
+    )
+    index = (docs / "index.html").read_text(encoding="utf-8")
+
+    assert "近 2 期" in index
+    assert "<svg" in index and 'id="trend-title"' in index
+    assert "<script" not in index  # 零 JS：趋势图是内联 SVG，没引入任何脚本或库
+
+
+def test_index_hides_trend_without_structured_stats(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir(parents=True)
+    history = [
+        _stats_entry(date(2026, 9, 17), commits=None, hours=None),
+        _stats_entry(date(2026, 9, 16), commits=None, hours=None),
+    ]
+    for entry in history:
+        (docs / entry.site_file).write_text("<html>详情</html>", encoding="utf-8")
+
+    render_site(_report(date(2026, 9, 18)), history, SiteConfig(directory=docs, title="测试日报"))
+    index = (docs / "index.html").read_text(encoding="utf-8")
+
+    # 旧行没有统计列，整个区块不渲染（样式表里仍有 .trend-chart 规则，这里断言的是标记）
+    assert 'id="trend-title"' not in index
+    assert "<svg" not in index

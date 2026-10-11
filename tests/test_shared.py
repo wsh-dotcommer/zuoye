@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -286,3 +287,144 @@ def test_client_sends_token_header() -> None:
     client.get_json("/rate_limit")
     assert seen["auth"] == "Bearer abc123"
     assert client.auth_configured is True
+
+
+def _stats_report(day: date, commits: int, hours: float) -> DailyReport:
+    return DailyReport(
+        date=day,
+        team_name="测试团队",
+        members=[MemberReport(name="红豆", github_username="wsh-dotcommer")],
+        generated_at=datetime(2026, 9, 18, 18, 0, tzinfo=timezone.utc),
+        markdown=f"# {day.isoformat()}",
+        html="<p>日报</p>",
+        commit_count=commits,
+        task_count=1,
+        message_count=2,
+        chat_message_count=3,
+        total_hours=hours,
+    )
+
+
+def test_storage_persists_structured_stats(tmp_path: Path) -> None:
+    storage = Storage(tmp_path / "data" / "reports.sqlite3")
+    storage.save(_stats_report(date(2026, 9, 18), 7, 1.0), "daily-report-2026-09-18.html")
+
+    entry = storage.get(date(2026, 9, 18))
+    assert (entry.commit_count, entry.task_count) == (7, 1)
+    assert (entry.message_count, entry.chat_message_count) == (2, 3)
+    assert entry.total_hours == 1.0
+    stats = entry.to_stats()
+    assert stats is not None and stats.commit_count == 7 and stats.date == date(2026, 9, 18)
+
+
+def test_storage_migrates_legacy_database(tmp_path: Path) -> None:
+    """v2.3 之前的库没有统计列：实例化时幂等补齐，旧行保持 NULL（无可比数据）。"""
+
+    path = tmp_path / "data" / "reports.sqlite3"
+    path.parent.mkdir(parents=True)
+    legacy = sqlite3.connect(path)
+    legacy.execute(
+        """
+        CREATE TABLE reports (
+            report_date TEXT PRIMARY KEY, team_name TEXT NOT NULL, member_count INTEGER NOT NULL,
+            generated_at TEXT NOT NULL, site_file TEXT NOT NULL, markdown TEXT NOT NULL, html TEXT NOT NULL
+        )
+        """
+    )
+    legacy.execute(
+        "INSERT INTO reports VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            "2026-09-17",
+            "测试团队",
+            1,
+            "2026-09-17T18:00:00+00:00",
+            "daily-report-2026-09-17.html",
+            "# 旧日报",
+            "<p>旧日报</p>",
+        ),
+    )
+    legacy.commit()
+    legacy.close()
+
+    storage = Storage(path)  # 触发迁移
+    Storage(path)  # 再次实例化：迁移必须幂等，不报错也不重建表
+
+    old = storage.get(date(2026, 9, 17))
+    assert old.commit_count is None and old.total_hours is None
+    assert old.to_stats() is None
+    assert old.markdown == "# 旧日报"  # 旧数据没被动过
+
+    storage.save(_stats_report(date(2026, 9, 18), 3, 0.5), "daily-report-2026-09-18.html")
+    assert storage.get(date(2026, 9, 18)).commit_count == 3
+    assert len(storage.list_reports()) == 2
+
+
+def _feishu_config_file(tmp_path: Path, *, enabled: bool, chats: str) -> Path:
+    path = tmp_path / "config.yaml"
+    root = tmp_path.as_posix()
+    path.write_text(
+        f"""
+team:
+  name: 测试团队
+  leader_email: leader@example.com
+repos:
+  - owner: octo
+    name: demo
+members:
+  - name: 红豆
+    github_username: wsh-dotcommer
+sources:
+  github:
+    token: ""
+  feishu:
+    enabled: {str(enabled).lower()}
+    app_id: ${{FEISHU_APP_ID}}
+    app_secret: ${{FEISHU_APP_SECRET}}
+    chats:
+{chats}
+report:
+  output_dir: {root}/output
+  site_dir: {root}/docs
+  storage_path: {root}/data/reports.sqlite3
+  log_path: {root}/logs/test.jsonl
+notify:
+  email:
+    enabled: false
+  lark_bot:
+    enabled: false
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_feishu_source_defaults_to_disabled(tmp_path: Path) -> None:
+    path = _feishu_config_file(tmp_path, enabled=False, chats="      []")
+
+    config = load_config(path, env={})
+
+    assert config.sources.feishu.enabled is False
+    assert config.sources.feishu.chats == ()
+    assert config.required_missing_env == ()
+
+
+def test_feishu_source_reports_missing_credentials(tmp_path: Path) -> None:
+    path = _feishu_config_file(
+        tmp_path,
+        enabled=True,
+        chats="      - id: oc_demo\n        name: 智能日报",
+    )
+
+    config = load_config(path, env={})
+
+    assert config.sources.feishu.enabled is True
+    chat = config.sources.feishu.chats[0]
+    assert (chat.chat_id, chat.name) == ("oc_demo", "智能日报")
+    assert config.required_missing_env == ("FEISHU_APP_ID", "FEISHU_APP_SECRET")
+
+
+def test_feishu_source_requires_chat_when_enabled(tmp_path: Path) -> None:
+    path = _feishu_config_file(tmp_path, enabled=True, chats="      []")
+
+    with pytest.raises(ConfigError):
+        load_config(path, env={"FEISHU_APP_ID": "cli", "FEISHU_APP_SECRET": "secret"})

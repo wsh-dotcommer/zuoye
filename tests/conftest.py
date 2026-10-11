@@ -98,6 +98,7 @@ def commit_item(
 ) -> dict:
     return {
         "sha": sha,
+        "html_url": f"https://github.com/octo/demo/commit/{sha}",
         "author": {"login": login} if login else None,
         "commit": {
             "message": message,
@@ -124,6 +125,8 @@ def issue_item(
     closed_at: str | None = None,
     assignee: str | None = None,
     pull_request: bool = False,
+    labels: list[str] | None = None,
+    comments: int = 0,
 ) -> dict:
     payload = {
         "number": number,
@@ -134,6 +137,9 @@ def issue_item(
         "closed_at": closed_at,
         "assignee": {"login": assignee} if assignee else None,
         "user": {"login": assignee or "someone"},
+        "html_url": f"https://github.com/octo/demo/issues/{number}",
+        "labels": [{"name": name} for name in labels or []],
+        "comments": comments,
     }
     if pull_request:
         payload["pull_request"] = {"url": "https://api.github.com/pulls/1"}

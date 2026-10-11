@@ -30,6 +30,8 @@ ISSUES = [
         updated_at="2026-09-18T05:00:00Z",
         closed_at="2026-09-18T05:00:00Z",
         assignee="zhangsan",
+        labels=["日报", "bug"],
+        comments=3,
     ),
     issue_item(
         3,
@@ -87,6 +89,11 @@ def test_collect_maps_issue_state_changes(config, monkeypatch) -> None:
     assert by_title["重新打开的任务"].status_to == STATUS_IN_PROGRESS
     assert by_title["修复限流等待"].assignee == "zhangsan"
     assert by_title["修复限流等待"].updated_at == datetime(2026, 9, 18, 5, 0, tzinfo=timezone.utc)
+    assert by_title["修复限流等待"].number == 2
+    assert by_title["修复限流等待"].url == "https://github.com/octo/demo/issues/2"
+    assert by_title["修复限流等待"].labels == ("日报", "bug")
+    assert by_title["修复限流等待"].comment_count == 3
+    assert by_title["新增日报模板"].labels == ()  # 没标签就是空元组，不塞占位符
     assert all(record.title and record.assignee for record in records)
 
 
