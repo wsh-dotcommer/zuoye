@@ -3,7 +3,7 @@
 ## 元信息
 
 - 关联规范：`specs/proposal.md`、`specs/design.md`
-- 任务总数：16（v1.1 新增 Task 11，v1.2 新增 Task 12，v2.0 新增 Task 13/14/15，v2.1 新增 Task 16）
+- 任务总数：19（v1.1 新增 Task 11，v1.2 新增 Task 12，v2.0 新增 Task 13/14/15，v2.1 新增 Task 16，v2.2 新增 Task 17，v2.3 新增 Task 18/19）
 - 预计总执行时间：4 到 6h（包含测试）
 - 执行策略：按依赖关系顺序执行，独立任务可并行执行
 - 相对书中的扩展点：书中采集层为 GitHub + 飞书任务 + 飞书消息，本期改为三个 GitHub 采集器（Task 3/4/5）；书中无静态站，本期把站点渲染并入生成层（Task 6）并在 Task 1 落地 `docs/` 与 Pages 基础文件。
@@ -18,6 +18,8 @@
 | v1.2 | 需求澄清 | 新增 Task 12「接入飞书群机器人」；修改 Task 8 验收标准（新增签名校验与自检）；执行顺序追加"阶段 9：Task 12" |
 | v2.0 | 需求变更 | 新增 Task 13「实现工作台前端资源」、Task 14「页面接入工作台与载荷」、Task 15「工作台测试与文档回归」；Task 6 的产物清单不变（仍是四个文件）；执行顺序追加"阶段 10–12" |
 | v2.1 | 需求变更 | 新增 Task 16「日报列出提交变更文件名」；修改 Task 3 的验收标准（`CommitRecord` 字段数 7 → 8）；执行顺序追加"阶段 13：Task 16" |
+| v2.2 | 需求变更 | 新增 Task 17「条目链接与任务上下文」；修改 Task 3/4/5/6 的验收标准（链接与上下文字段、HTML 锚点渲染、单人团队合并）；执行顺序追加"阶段 14：Task 17" |
+| v2.3 | 需求变更 | 新增 Task 18「近 N 期趋势与对比」、Task 19「飞书群消息只读数据源」；修改 Task 2 的验收标准（结构化统计列与幂等迁移）；执行顺序追加"阶段 15–16" |
 
 ---
 
@@ -59,6 +61,8 @@
 - [ ] `errors.py` 定义 `CollectorError`、`GeneratorError`、`NotifierError`、`ConfigError` 四个自定义异常
 - [ ] `http.py` 支持超时重试 3 次（间隔可配）、403/429 限流等待 reset（等待上限可配），并可通过注入 transport 在测试中离线运行
 - [ ] `storage.py` 能创建 SQLite，按日期幂等写入并查询日报记录
+- [ ] `storage.py` 在 v2.3 起同时落库结构化统计列，并对 v2.3 之前的老库做幂等列迁移（旧行为 `NULL`，见 design.md §6.7）
+- [ ] `http.py` 在 v2.3 起提供 `FeishuClient`（`tenant_access_token` 认证 + 同样的重试策略），业务返回码 `code != 0` 视为失败
 - [ ] 全部模块包含对应单元测试，测试通过
 
 ---
@@ -394,6 +398,75 @@ v1.1.1 补充验收标准（缺陷修复）：
 
 ---
 
+## Task 17: 条目链接与任务上下文（新增 v2.2）
+
+描述：把日报条目可点击化（提交短 SHA、Issue 编号、评论来源），给任务行补标签/指派/评论数，并在单人团队时合并重复的头部与成员标题。所有数据都取自采集器已在请求的响应，不新增 HTTP 请求。
+
+输入：`specs/proposal.md` §2.1、§3.1（v2.2），`specs/design.md` §3、§4.1、§4.2（v2.2）
+
+输出：`shared/models.py`、`collector/` 三个采集器、`generator/formatter.py`、`generator/template.py`、`generator/templates/report.html.j2` + 更新后的采集与生成测试
+
+依赖：Task 3、Task 4、Task 5、Task 6
+
+验收标准：
+
+- [ ] 提交行输出 `[短SHA](链接)`（7 位）；缺 SHA 时整段省略，不留 `[]()` 空壳
+- [ ] 任务行输出 `[#编号](链接) 标题：A → B`；缺链接时退回 `#编号`
+- [ ] 协作沟通行来源带链接；缺链接时保持 `[来源]` 原样
+- [ ] 任务行括号补充标签、指派与评论数，空片段不出现；指派人与本段成员一致时省略
+- [ ] 站点详情页与邮件正文把 Markdown 链接渲染成 `<a>`（新窗口 + `rel="noopener"`），链接文字与 URL 分别转义，无法注入属性
+- [ ] 单人团队省略成员标题并把身份并入头部 `- 团队：姓名（@username）`；多人团队行为与 v2.1 一致
+- [ ] 三个采集器的新字段都有单元测试断言；`pytest` 全绿
+
+---
+
+## Task 18: 近 N 期趋势与对比（新增 v2.3）
+
+描述：给日报头部加「对比上期」与「近 N 期」两行，给索引页加内联 SVG 趋势图；为此把日报统计落成 SQLite 结构化列。
+
+输入：`specs/proposal.md` §2.1/§2.2/§3.1（v2.3），`specs/design.md` §3（`ReportStats`）、§4.2、§4.3、§6.7、ADR-009
+
+输出：`shared/storage.py`、`shared/models.py`、`generator/formatter.py`、`generator/site.py`、`generator/template.py`、`generator/templates/index.html.j2`、`generator/templates/style.css`、`main.py` + 更新后的存储/生成/站点/集成测试
+
+依赖：Task 2、Task 6、Task 9
+
+验收标准：
+
+- [ ] `reports` 表新增五个统计列；老库实例化时幂等补齐，旧行为 `NULL`
+- [ ] `HistoryEntry.to_stats()` 对旧行返回 `None`，对比与趋势都会跳过而不是当 0
+- [ ] 头部「对比上期（日期）：提交 ±N · 任务 ±N · 沟通 ±N · 工时 ±N.Nh」，基数取最近一期已保存日报；无历史时整行不出现
+- [ ] 头部「近 N 期：提交 ▁▂▃█（合计）· 工时 ▁▂▃█（合计）」，不足 2 期不出现；全 0 序列不虚高
+- [ ] 索引页在有两期及以上带统计的日报时渲染 `<svg>` 柱状图（提交数、工时），标注日期与数值；不足两期或全 0 时不渲染
+- [ ] 趋势图不引入任何脚本、图表库或外部资源，`docs/` 仍是四个文件（ADR-009、§6.5）
+- [ ] 邮件正文与飞书卡片自动带上头部两行（与 Markdown 共用 `extra_lines`）
+- [ ] `pytest` 全绿，并覆盖迁移、sparkline 边界、对比行、SVG 渲染与"无历史不出现"
+
+---
+
+## Task 19: 飞书群消息只读数据源（新增 v2.3）
+
+描述：新增企业自建应用读取指定群的会话历史，只产出"条数与发言人数"，正文就地丢弃。
+
+输入：`specs/proposal.md` §2.1/§2.2/§3.1（v2.3），`specs/design.md` §2、§3（`ChatSummaryRecord`）、§4.1、§6.6
+
+输出：`shared/http.py`（`FeishuClient`）、`collector/feishu_message.py`、`shared/config.py`、`main.py`、`config.yaml.example`、`.env.example` + `tests/test_feishu_message.py` 与集成测试
+
+依赖：Task 2、Task 5（讨论采集的过滤口径）、Task 9
+
+验收标准：
+
+- [ ] 配置新增 `sources.feishu`（`enabled`/`app_id`/`app_secret`/`base_url`/`chats[id,name]`/重试与超时），默认 `false`
+- [ ] `enabled: true` 但凭据为空时，`--check` 报出缺失的环境变量名；`enabled: true` 但没有 `chats` 时启动即报配置错误
+- [ ] 未启用时采集器不发起任何请求，采集计划里也没有这一项（日报与 v2.2 完全一致）
+- [ ] `tenant_access_token` 单次运行只取一次；`code != 0` 与 HTTP 4xx/5xx 都按失败处理并重试后抛 `CollectorError`
+- [ ] 只统计 `sender_type=user` 且非 `system` 的消息，按左闭右开窗口二次裁剪 `create_time`
+- [ ] 产出 `ChatSummaryRecord`（群名 / 条数 / 发言人数），模型里没有内容字段，产物与日志里搜不到消息正文
+- [ ] 日报头部出现 `- 飞书群：群名 N 条 · M 人发言`，数据源徽章出现 `飞书消息 N 条`（N 为消息总条数）
+- [ ] 飞书源失败只标记该源失败，其它数据源与推送不受影响；`--check` 增加飞书 token 检查
+- [ ] 全部使用 `httpx.MockTransport`，不访问真实网络；`pytest` 全绿
+
+---
+
 ## 执行顺序
 
 推荐执行顺序（考虑依赖关系和并行机会）：
@@ -411,3 +484,6 @@ v1.1.1 补充验收标准（缺陷修复）：
 - 阶段 11：Task 14（页面接入工作台与内联载荷，v2.0 新增）
 - 阶段 12：Task 15（工作台测试、全量回归与 README，v2.0 新增）
 - 阶段 13：Task 16（日报列出提交变更文件名，v2.1 新增）
+- 阶段 14：Task 17（条目链接与任务上下文，v2.2 新增）
+- 阶段 15：Task 18（近 N 期趋势与对比，v2.3 新增）
+- 阶段 16：Task 19（飞书群消息只读数据源，v2.3 新增）

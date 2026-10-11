@@ -1,6 +1,6 @@
 # 智能日报生成器 — 架构设计
 
-规范版本：v2.1（与 `specs/proposal.md` v2.1 对应）
+规范版本：v2.3（与 `specs/proposal.md` v2.3 对应）
 
 ## 变更记录
 
@@ -13,6 +13,8 @@
 | v1.2.1 | 实现细节变更（起点为代码，逆向回溯更新本文件） | 站点与邮件的模板、样式改用参考页的设计体系（页头品牌区、衬线标题、卡片式历史列表、数据源徽章、虚线空状态；仍为零 JS、零外部资源）；`generator/templates/` 与 `assets/style.css` 重写，并修复模板中样式被自动转义导致字体栈失效的缺陷。§2 模块职责、§3 数据模型、§4 接口契约、§4.3 产物清单与四板块文案均未变，故 `proposal.md` 与 `tasks.md` 不升版 |
 | v2.0 | 需求变更（由 proposal.md v2.0 传导） | §2 生成层职责扩展为"渲染页面载荷与工作台脚本"；§3 新增页面载荷与本地草稿结构；§4.3 扩展站点层契约（`interactive`、`markdown`、`SiteConfig.workbench`、载荷转义规则）；§5 新增 ADR-008（交互放浏览器端，不加服务、不加 Actions）；§6 增加工作台的安全与可用性约束。采集层、工时推导、推送层契约不变 |
 | v2.1 | 需求变更（由 proposal.md v2.1 传导） | §3 `CommitRecord` 新增 `files` 字段（变更文件名）；§4.1 明确文件名复用同一次提交详情请求、不额外占用限流预算；§4.2 新增「代码提交」条目的文件名口径（最多 10 个 + `…`，无文件名退回旧格式）。采集窗口、工时推导、站点层与推送层契约不变 |
+| v2.2 | 需求变更（由 proposal.md v2.2 传导） | §3 三个记录类型补链接与上下文字段（`CommitRecord.sha/url`、`TaskRecord.number/url/labels/comment_count`、`MessageRecord.url`）；§4.1 明确这些字段都来自已在请求的同一批响应；§4.2 新增内联链接、任务行括号补充与单人团队合并三项渲染口径。模板新增 `inline_links` 过滤器，站点层与推送层接口不变 |
+| v2.3 | 需求变更（由 proposal.md v2.3 传导） | ①新增飞书群消息采集器与 `FeishuClient`（§2/§3/§4.1）；②`reports` 表新增结构化统计列并做幂等迁移（§3/§6.3）；③§4.2 新增「对比上期」「近 N 期」两行与趋势序列口径；④§4.3 新增索引页内联 SVG 趋势区块；⑤新增 ADR-009 与 §6.6 隐私约束。推送层契约不变 |
 
 ## 1. 系统架构
 
@@ -44,10 +46,10 @@
 
 | 模块 | 文件 | 负责 | 不负责 |
 | --- | --- | --- | --- |
-| collector/ | `github_commit.py`<br>`github_issue.py`<br>`github_discussion.py` | 从 GitHub REST API 获取原始数据：提交记录、Issue 状态变更、PR/Issue 讨论；做字段标准化与配置级过滤 | 不做日报排版、不做成员聚合决策、不做推送 |
+| collector/ | `github_commit.py`<br>`github_issue.py`<br>`github_discussion.py`<br>`feishu_message.py` | 从 GitHub REST API 获取原始数据：提交记录、Issue 状态变更、PR/Issue 讨论；可选地从飞书群消息只读汇总条数与发言人数（v2.3）；做字段标准化与配置级过滤 | 不做日报排版、不做成员聚合决策、不做推送；飞书采集器不保留消息正文 |
 | generator/ | `formatter.py`<br>`hours.py`<br>`template.py`<br>`site.py` | 按成员聚合原始记录、编排日报板块、从提交时间推导工时（会话法）、生成 Markdown 与 HTML、渲染静态日报站（索引页+详情页）、把日报正文序列化为页面内联载荷并内联工作台脚本（`templates/workbench.js`） | 不做数据采集、不调用外部 API、不做推送、不提供任何服务端接口 |
 | notifier/ | `email.py`<br>`lark_bot.py` | 将日报推送给目标：SMTP 邮件发送、飞书群机器人消息推送（含可选签名校验与连通性自检） | 不做数据处理、不做日报生成、不做数据采集 |
-| shared/ | `config.py`<br>`logger.py`<br>`errors.py`<br>`http.py`<br>`filters.py`<br>`models.py`<br>`storage.py` | 跨模块共享能力：配置读取与校验、JSON Lines 日志、自定义异常与错误处理策略、HTTP 重试/限流策略、机器人账号过滤规则、数据模型定义、SQLite 日报历史 | 不包含业务规则、不感知具体数据源字段、不负责编排 |
+| shared/ | `config.py`<br>`logger.py`<br>`errors.py`<br>`http.py`<br>`filters.py`<br>`models.py`<br>`storage.py` | 跨模块共享能力：配置读取与校验、JSON Lines 日志、自定义异常与错误处理策略、HTTP 重试/限流策略（含 v2.3 的 `FeishuClient` 与 `tenant_access_token` 认证）、机器人账号过滤规则、数据模型定义、SQLite 日报历史（含 v2.3 结构化统计列与幂等迁移） | 不包含业务规则、不感知具体数据源字段、不负责编排 |
 | main.py | `main.py` | 编排入口：按顺序调用采集层→生成层→站点层→推送层，处理全局异常与工作日判断，记录执行状态 | 不实现采集/生成/推送细节 |
 
 **关于 `shared/models.py` 与 `shared/http.py`**：书中示例的共享层只列了 config/logger/errors/storage 四个文件。本期把数据模型与 HTTP 重试策略也收回共享层，理由是：五个模块都要引用同一份数据模型定义，若放在采集层会导致生成层反向依赖采集层；重试与限流策略是 proposal 中"错误处理"这一非功能约束的统一实现，写在每个采集器里会造成三份重复代码。
@@ -68,6 +70,8 @@
 | deletions | int | 删除行数 |
 | files_changed | int | 变更文件数 |
 | files | tuple[str, ...] | 变更文件名（v2.1 新增；来自提交详情端点的 `files` 数组，GitHub 单次最多返回 300 个；未取详情统计的提交为空元组） |
+| sha | str | 提交 SHA（v2.2 新增；渲染时截取前 7 位作为短号） |
+| url | str | 提交页面链接（v2.2 新增；缺失时条目退化为只显示短号） |
 
 ### TaskRecord（任务变更记录）
 
@@ -78,6 +82,10 @@
 | status_from | str | 原状态：新建 / 进行中 / 已完成 |
 | status_to | str | 新状态：新建 / 进行中 / 已完成 |
 | updated_at | datetime | 状态变更时间 |
+| number | int | Issue 编号（v2.2 新增） |
+| url | str | Issue 页面链接（v2.2 新增） |
+| labels | tuple[str, ...] | Issue 标签（v2.2 新增；对象数组与字符串数组两种 API 形态都归一为名称元组） |
+| comment_count | int | Issue 评论总数（v2.2 新增） |
 
 ### MessageRecord（协作讨论记录）
 
@@ -87,6 +95,7 @@
 | content | str | 讨论内容（纯文本，报告中截断展示） |
 | timestamp | datetime | 发言时间 |
 | source | str | 讨论来源（如 `owner/repo #12`，替代书中的"群名称"） |
+| url | str | 评论页面链接（v2.2 新增；缺失时来源保持 `[source]` 原样） |
 
 ### MemberReport（成员报告）
 
@@ -127,10 +136,30 @@
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| name | str | 数据源标识：github_commit / github_issue / github_discussion |
+| name | str | 数据源标识：github_commit / github_issue / github_discussion / feishu_message（v2.3） |
 | ok | bool | 本次采集是否成功 |
-| count | int | 采集到的记录条数 |
+| count | int | 采集到的记录条数；飞书源为"消息总条数"（v2.3） |
 | error | str | 失败原因（成功时为空串） |
+
+### ChatSummaryRecord（飞书群汇总，v2.3 新增）
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| chat_name | str | 群名（取自配置 `sources.feishu.chats[].name`） |
+| message_count | int | 窗口内真人消息条数 |
+| speaker_count | int | 窗口内去重后的发言人数 |
+
+> 该模型**没有**消息内容字段：正文在采集器里就地丢弃（见 §6.6）。
+
+### ReportStats（日报结构化统计，v2.3 新增）
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| date | date | 日报日期 |
+| commit_count / task_count / message_count / chat_message_count | int | 各数据源当期的记录条数 |
+| total_hours | float | 当期团队合计工时 |
+
+> 与 `reports.sqlite3` 的统计列一一对应（见 §6.3），供「对比上期」与「近 N 期趋势」使用，避免反向解析 Markdown。
 
 ### WorkbenchPayload（页面内联载荷，v2.0 新增）
 
@@ -170,6 +199,8 @@ collect(config: Config, start: datetime, end: datetime) -> list[CommitRecord | T
 - 采集器必须支持分页（GitHub 默认每页 30~100 条），并在共享层 `http.py` 中统一实现超时重试与限流等待。
 - 限流预算：单次运行的"逐条提交统计"与"Issue timeline 查询"数量分别由 `max_commit_details`、`max_issue_timelines` 限制；超出上限后退化为零统计或按 `closed_at`/`created_at` 字段推断，并记录警告日志。
 - 变更文件名（v2.1）：与"增删行数、变更文件数"来自**同一次**提交详情请求，采集器只做字段映射，不额外发起请求、不额外占用限流预算；超出 `max_commit_details` 上限或详情请求失败的提交，`files` 为空元组，提交记录本身仍然保留。
+- 链接与上下文字段（v2.2）：`sha` / `html_url` / `labels` / `comments` 全部取自采集器**已经在请求**的同一批响应（提交列表、Issue 列表、评论列表），不新增任何 HTTP 请求，限流预算不变。
+- 飞书群消息（v2.3）：新增 `collector/feishu_message.py`，契约 `collect(config, start, end) -> list[ChatSummaryRecord]`。用 `FeishuClient` 换 `tenant_access_token`（单次运行一次），逐群调用 `GET /open-apis/im/v1/messages`（`container_id_type=chat` + `container_id` + 秒级 `start_time/end_time` + `page_token` 翻页），按左闭右开窗口二次裁剪 `create_time`（毫秒时间戳）；跳过 `sender_type=app` 与 `msg_type=system`，只累计条数与去重发言人数。`sources.feishu.enabled` 为假时**直接返回空列表且不发任何请求**，编排层也不把它放进采集计划。
 - 任务进展只统计**真正的 Issue**：GitHub 的 `issues` 端点会同时返回 Pull Request（带 `pull_request` 字段），采集器显式跳过它们，避免与"代码提交"板块重复计数；PR 的产出通过提交与评审评论体现。
 - 去重口径：同一个 Issue 在**同一次运行**里只保留窗口内**最后一次**状态变更（例如"上午新建、下午关闭"只会输出「进行中 → 已完成」），避免同一条任务在日报里刷屏；若希望两次变更分别出现，请分两次运行。
 
@@ -179,6 +210,7 @@ collect(config: Config, start: datetime, end: datetime) -> list[CommitRecord | T
 generate(
     date, members, commits, tasks, messages, source_statuses, team_name,
     *, timezone_name: str = "Asia/Shanghai", hours_rules: HoursRules | None = None,
+    recent: Sequence[ReportStats] = (), chat_summaries: Sequence[ChatSummaryRecord] = (),   # v2.3
 ) -> DailyReport
 ```
 
@@ -187,6 +219,11 @@ generate(
 - v1.1 起 `timezone_name` 与 `hours_rules` 为**仅关键字参数且带默认值**，旧调用无需改动（回归约束）。
 - 渲染规则：成员段落固定按"代码提交→任务进展→工时统计→协作沟通"四节输出；空数据节输出"今日无记录"；`source_statuses` 中失败的数据源在对应节输出"数据获取失败（原因）"；工时不可用时输出"工时数据不可用（原因）"。
 - 「代码提交」条目格式（v2.1）：`` - `repo` message（+A/-D，N 个文件：f1、f2、…） ``；文件名最多列 10 个（常量 `COMMIT_FILE_LIMIT`，超出时在第 10 个后追加 `、…`，数量已在前文给出、不重复计数）；`files` 为空时退回 `（+A/-D，N 个文件）`，不出现空冒号。文件名不加反引号，`&`/`<`/`>` 交由既有 Markdown / HTML 转义处理；Markdown、站点详情页与邮件正文共用这一份文本，因此三端自动一致。
+- 条目链接（v2.2）：Markdown 版输出 `[文字](链接)`（提交行短 SHA 7 位、任务行 `#编号`、协作沟通行来源标识）；站点详情页与邮件正文的 HTML 侧由 `generator/template.py` 的 `inline_links` 过滤器把同一串文本转成 `<a href target="_blank" rel="noopener">`——先按片段转义文本与锚点文字、URL 作为属性值转义，只认 `http(s)` 链接，不做完整 Markdown 渲染。缺链接时提交行只输出短号、任务行只输出 `#编号`；SHA 与编号都缺时整段省略，不出现空壳标记。
+- 任务行括号补充（v2.2）：依次为 `标签：a、b`、`指派：X`、`N 条评论`，三段用 ` · ` 连接，没有的片段整体不出现；`指派` 与本段成员的 `github_username` 一致时省略（日报按人聚合，写自己名字是噪音）。
+- 单人团队合并（v2.2）：`len(members) == 1` 时头部输出 `- 团队：<团队名>（@<username>）` 并省略成员标题（Markdown 的 `## 姓名（username）` 与 HTML 的成员面板头）；成员数为 2 及以上时行为与 v2.1 完全一致。
+- 头部补充行（v2.3）：在「工时」行之后按顺序追加三行可选项，空的不出现——①`- 飞书群：群名 N 条 · M 人发言`（多群用 `；` 连接）；②`- 对比上期（YYYY-MM-DD）：提交 ±N · 任务 ±N · 沟通 ±N · 工时 ±N.Nh`，基数取 `recent[-1]`（最近一期已保存日报），其日期不早于当日或无历史时整行不出现；③`- 近 N 期：提交 ▁▂▃█（合计条数）· 工时 ▁▂▃█（合计小时）`，序列 = `recent` 末尾 6 期 + 当日本期，不足 2 期不出现。三行在 Markdown 与 HTML 中共用 `build_view()["extra_lines"]`，因此邮件正文与飞书卡片自动一致。
+- 迷你趋势字符（v2.3）：8 档块字符 `▁▂▃▄▅▆▇█` 按 `value / max(values)` 归一化取档；最大值 ≤ 0 时全部取最低档（不虚高）；差值文本用 `±0` 表示零、负值带 `-`、工时带 `h` 后缀并沿用 `_format_hours` 的去尾零规则。
 - 日报头部增加汇总行：`工时：团队合计 X.Xh · 人均 Y.Yh（按提交时间推导，非真实考勤）`，人均 = 合计 ÷ 成员数。
 
 工时推导契约（v1.1 新增，纯计算，不访问网络）：
@@ -206,7 +243,7 @@ derive(members, commits, window, timezone_name: str, rules: HoursRules) -> dict[
 ```python
 render_site(report: DailyReport, history: list[HistoryEntry], site_config: SiteConfig) -> list[Path]
 render_report_html(view, *, back_link=False, markdown=None, interactive=False) -> str   # v2.0 扩展
-render_index_html(entries, *, site_title, team_name, generated_at, interactive=True) -> str   # v2.0 扩展
+render_index_html(entries, *, site_title, team_name, generated_at, interactive=True, trend=None) -> str   # v2.0/v2.3 扩展
 render_workbench_js() -> str   # v2.0 新增
 render_workbench_data(view_or_entries, markdown=None) -> str   # v2.0 新增
 ```
@@ -218,6 +255,7 @@ render_workbench_data(view_or_entries, markdown=None) -> str   # v2.0 新增
 - 邮件纯净性（v2.0）：邮件正文走 `render_report_html` 的默认 `interactive=False`，因此不含脚本、不含复制/载入按钮；`render_index_html` 的 `interactive` 默认 `True`，只有站点索引页会渲染工作台。
 - 载荷范围（v2.0）：索引页内联的期数等于索引条目数（受 `main.py` 的 `HISTORY_LIMIT` 约束），因此"从自动日报载入"下拉不会出现没有内容的日期。
 - 关闭开关（v2.0）：`SiteConfig.workbench=False`（来自配置 `report.workbench`）时，模板不渲染工作台区块与脚本，页面回到 v1.x 的纯只读形态。
+- 趋势区块（v2.3）：`site.build_trend(history)` 从历史条目的结构化统计列取最近 7 期，在 Python 里算好 SVG 柱子的坐标（`x/y/width/height` 与日期、数值文本）后交给模板；不足 2 期或全为 0 时返回 `None`，区块与 `<svg>` 都不渲染。柱子只由 `<rect>` 与 `<text>` 组成，**不引入任何脚本或图表库**，页面仍是零 JS（既有工作台载荷除外）。
 
 ### 4.4 推送层
 
@@ -376,6 +414,24 @@ check(target: LarkBotTarget) -> tuple[bool, str]      # v1.2
 
 **理由**：1）`docs/` 的发布路径仍是"GitHub Pages + main/docs"，不引入服务、端口与密钥，交接成本最低；2）自动日报仍由定时任务生成，工作台只负责"人工整理与补充"，两者职责不混；3）代价是"手写内容不能自动合并进自动日报、草稿不跨设备"，因此把这两点写进 proposal §2.2 的排除项，并在页面上明示"内容不会上传"。
 
+### ADR-009：趋势图用内联 SVG，而不是引入图表库或 Canvas（v2.3）
+
+**状态**：已采纳
+
+**背景**：v2.3 要求在索引页展示"近 7 期提交数与工时趋势"。可选路径有三条：引 ECharts/Chart.js 之类的图表库；用 Canvas 手写绘制；直接在模板里手写内联 SVG。
+
+**选项**
+
+| 选项 | 优点 | 缺点 |
+| --- | --- | --- |
+| 图表库（ECharts / Chart.js） | 交互能力最强，代码最少 | 违反 §6.5"不引入第三方脚本与外部资源"；`docs/` 会从四个文件膨胀；新增 npm/构建链 |
+| Canvas 手写 | 无外部依赖 | 需要 JS：不仅违反"零 JS"叙事，还会在禁用脚本时整块消失，与渐进增强的既有约定冲突 |
+| 内联 SVG（几何在 Python 算好） | 零 JS、零外部资源、无 DOM 依赖；禁用脚本也能看；可无障碍标注 | 表达能力有限（只适合柱状/折线这类简单图），改样式要改模板 |
+
+**决策**：用内联 SVG，柱子的坐标、日期与数值文本全部在 `generator/site.py` 里算好，模板只负责输出 `<rect>` 与 `<text>`。
+
+**理由**：1）守住"页面不发请求、零外部资源"的既有红线（§6.5、ADR-004），`docs/` 仍是四个文件；2）禁用 JavaScript 时趋势图照常显示，比 Canvas 方案更符合渐进增强；3）缺点是图表能力有限，因此把展示范围限定为"提交数 + 工时"两张柱状图，不承诺下钻与交互。
+
 ## 6. 非功能性约束
 
 ### 6.1 错误处理策略（优雅降级）
@@ -426,3 +482,17 @@ check(target: LarkBotTarget) -> tuple[bool, str]      # v1.2
 5. **渐进增强**：工作台区块默认带 `hidden`，脚本就绪后才显示；脚本被禁用时页面退回 v1.x 的只读形态。`localStorage` 不可用（隐私模式）时，工作台仍可生成与复制，但改成提示"草稿只在本次会话内有效"。
 6. **复制降级**：优先使用 Clipboard API；不可用时退回 `document.execCommand("copy")`；仍失败则选中内容并提示手动复制，不抛未捕获异常。
 7. **可关闭**：配置 `report.workbench: false` 可重新生成不含任何脚本的纯只读站点，作为团队不接受页面交互时的逃生开关。
+
+### 6.6 飞书群消息的隐私边界（v2.3 新增）
+
+1. **只取计数**：数据源只产出"条数 + 去重发言人数"（`ChatSummaryRecord` 没有内容字段），正文在采集器里就地丢弃。
+2. **不落盘**：消息正文不写模型、不写 SQLite、不写 Markdown/HTML、不写 JSON Lines 日志（连失败留痕也只记群名与错误原因）。
+3. **不改推送通道**：群消息读取走只读的企业自建应用（`tenant_access_token`），推送仍走群自定义机器人 Webhook；两者的凭据分别放在 `FEISHU_APP_ID/FEISHU_APP_SECRET` 与 `LARK_BOT_WEBHOOK/LARK_BOT_SECRET`，互不复用。
+4. **默认关闭**：`sources.feishu.enabled` 默认 `false`；未启用时采集计划里没有这一项，日报与站点与 v2.2 完全一致。
+5. **公开页面约束**：`docs/` 发布后是公开页面，因此飞书相关的展示只允许出现群名与计数，任何情况下都不允许把消息正文写进页面。
+
+### 6.7 存储迁移（v2.3 新增）
+
+1. `reports` 表的建表语句已包含 `commit_count` / `task_count` / `message_count` / `chat_message_count` / `total_hours` 五个统计列。
+2. 老库（v2.3 之前创建）在 `Storage` 实例化时用 `PRAGMA table_info` 检测缺列并 `ALTER TABLE ... ADD COLUMN` 补齐，**幂等**且不重建表、不动旧数据。
+3. 补齐后的旧行这些列为 `NULL`，语义是"无可比数据"：对比与趋势都会跳过它们，而不是当成 0 参与计算。
