@@ -28,6 +28,7 @@ from shared.models import (
 )
 
 CONTENT_PREVIEW_LIMIT = 140
+COMMIT_FILE_LIMIT = 10
 EMPTY_NOTE = "今日无记录"
 FAILED_LABEL = "数据获取失败"
 
@@ -297,10 +298,24 @@ def _format_hours(value: float) -> str:
 
 def _commit_items(commits: Sequence[CommitRecord]) -> list[str]:
     return [
-        f"- `{record.repo}` {record.message or '(无提交信息)'}"
-        f"（+{record.additions}/-{record.deletions}，{record.files_changed} 个文件）"
+        f"- `{record.repo}` {record.message or '(无提交信息)'}{_commit_stats(record)}"
         for record in commits
     ]
+
+
+def _commit_stats(record: CommitRecord) -> str:
+    """提交行的变更统计；有文件名时在数量后列出（最多 COMMIT_FILE_LIMIT 个，超出以 `…` 结尾）。
+
+    文件名缺失（未取详情统计、详情请求失败）时退回只报数量的旧格式，不出现空冒号。
+    """
+
+    summary = f"（+{record.additions}/-{record.deletions}，{record.files_changed} 个文件"
+    if record.files:
+        shown = "、".join(record.files[:COMMIT_FILE_LIMIT])
+        if len(record.files) > COMMIT_FILE_LIMIT:
+            shown += "、…"
+        summary += f"：{shown}"
+    return summary + "）"
 
 
 def _task_items(tasks: Sequence[TaskRecord]) -> list[str]:
