@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timezone
 
 from generator import formatter
@@ -31,6 +32,7 @@ COMMITS = [
         additions=120,
         deletions=3,
         files_changed=4,
+        files=("a.py", "b.py", "c.py", "d.py"),
     )
 ]
 TASKS = [
@@ -77,10 +79,34 @@ def test_markdown_contains_three_sections() -> None:
     assert "### 任务进展" in markdown
     assert "### 工时统计" in markdown
     assert "### 协作沟通" in markdown
-    assert "feat: 新增静态日报站（+120/-3，4 个文件）" in markdown
+    assert "feat: 新增静态日报站（+120/-3，4 个文件：a.py、b.py、c.py、d.py）" in markdown
     assert "补齐集成测试：进行中 → 已完成" in markdown
     assert "代码提交 1 条" in markdown
     assert "协作沟通 数据获取失败" in markdown
+
+
+def test_commit_files_are_truncated_to_limit() -> None:
+    files = tuple(f"file-{index}.py" for index in range(11))
+    commits = [replace(COMMITS[0], files=files, files_changed=len(files))]
+
+    markdown = formatter.generate(
+        date(2026, 9, 18), MEMBERS, commits, TASKS, MESSAGES, STATUSES, "测试团队"
+    ).markdown
+
+    assert "（+120/-3，11 个文件：file-0.py、" in markdown
+    assert "file-9.py、…）" in markdown
+    assert "file-10.py" not in markdown  # 第 11 个被截断
+
+
+def test_commit_without_file_names_keeps_count_only_format() -> None:
+    commits = [replace(COMMITS[0], files=())]
+
+    markdown = formatter.generate(
+        date(2026, 9, 18), MEMBERS, commits, TASKS, MESSAGES, STATUSES, "测试团队"
+    ).markdown
+
+    assert "feat: 新增静态日报站（+120/-3，4 个文件）" in markdown
+    assert "个文件：" not in markdown  # 没有文件名时不留空冒号
 
 
 def test_hours_section_order_and_content() -> None:

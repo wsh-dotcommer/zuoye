@@ -39,7 +39,7 @@ def _handler(seen: list[str], *, stats_status: int = 200):
     return handler
 
 
-def test_collect_returns_seven_fields(config, monkeypatch) -> None:
+def test_collect_returns_eight_fields(config, monkeypatch) -> None:
     seen: list[str] = []
     patch_client(monkeypatch, github_commit, _handler(seen))
 
@@ -55,6 +55,7 @@ def test_collect_returns_seven_fields(config, monkeypatch) -> None:
     assert isinstance(first.files_changed, int)
     assert first.timestamp == datetime(2026, 9, 18, 10, 0, tzinfo=timezone.utc)
     assert (first.additions, first.deletions, first.files_changed) == (120, 3, 4)
+    assert first.files == ("file-0.py", "file-1.py", "file-2.py", "file-3.py")
 
 
 def test_collect_falls_back_to_email_when_login_missing(config, monkeypatch) -> None:
@@ -80,6 +81,7 @@ def test_collect_respects_details_limit(config, monkeypatch) -> None:
     detail_calls = [path for path in seen if "/commits/sha-" in path]
     assert len(detail_calls) == 1
     assert (records[1].additions, records[1].deletions, records[1].files_changed) == (0, 0, 0)
+    assert records[1].files == ()
 
 
 def test_collect_keeps_record_when_stats_unavailable(config, monkeypatch) -> None:
@@ -89,6 +91,7 @@ def test_collect_keeps_record_when_stats_unavailable(config, monkeypatch) -> Non
 
     assert len(records) == 2
     assert records[0].files_changed == 0
+    assert records[0].files == ()
 
 
 def test_collect_raises_collector_error_on_failure(config, monkeypatch) -> None:
