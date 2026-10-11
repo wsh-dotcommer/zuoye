@@ -18,7 +18,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from collector import github_commit, github_discussion, github_issue
+from collector import feishu_message, github_commit, github_discussion, github_issue
 from generator import formatter
 from generator.hours import HoursRules
 from generator.site import SiteConfig, detail_file_name, render_site
@@ -30,7 +30,9 @@ from shared.logger import JsonLineLogger, build_logger
 from shared.models import (
     SOURCE_COMMIT,
     SOURCE_DISCUSSION,
+    SOURCE_FEISHU,
     SOURCE_ISSUE,
+    ReportStats,
     SourceStatus,
 )
 from shared.storage import Storage
@@ -39,6 +41,7 @@ EXIT_OK = 0
 EXIT_CHECK_FAILED = 1
 EXIT_ALL_SOURCES_FAILED = 2
 HISTORY_LIMIT = 90
+RECENT_LIMIT = 7
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -85,10 +88,18 @@ def _run_pipeline(config: Config, args: argparse.Namespace, logger: JsonLineLogg
         dry_run=bool(args.dry_run),
     )
 
-    commits, tasks, messages, statuses = _collect_all(config, start, end, logger)
+    collected, statuses = _collect_all(config, start, end, logger)
     if not any(status.ok for status in statuses):
         logger.error("all_sources_failed", statuses=[status.name for status in statuses])
         return EXIT_ALL_SOURCES_FAILED
+
+    commits = collected[SOURCE_COMMIT]
+    tasks = collected[SOURCE_ISSUE]
+    messages = collected[SOURCE_DISCUSSION]
+
+    # v2.3：先读历史统计（趋势与对比要用），再生成；保存仍在本期生成之后，按日期幂等覆盖
+    storage = Storage(config.report.storage_path)
+    recent = _recent_stats(storage)
 
     members = _effective_members(config, commits, tasks, messages, logger)
     report = formatter.generate(
@@ -101,12 +112,13 @@ def _run_pipeline(config: Config, args: argparse.Namespace, logger: JsonLineLogg
         config.team.name,
         timezone_name=config.team.timezone,
         hours_rules=HoursRules.from_config(config.hours),
+        recent=recent,
+        chat_summaries=collected.get(SOURCE_FEISHU, []),
     )
 
     outputs = _write_outputs(config, report)
     logger.info("report_generated", files=[str(path) for path in outputs])
 
-    storage = Storage(config.report.storage_path)
     site_file = detail_file_name(report.date)
     storage.save(report, site_file)
     history = storage.list_reports(limit=HISTORY_LIMIT)
@@ -142,14 +154,20 @@ def _collect_all(
     start: datetime,
     end: datetime,
     logger: JsonLineLogger,
-) -> tuple[list, list, list, list[SourceStatus]]:
-    """逐数据源采集：任一源失败只标记该源，不阻断其他源（design.md §6.1）。"""
+) -> tuple[dict[str, list], list[SourceStatus]]:
+    """逐数据源采集：任一源失败只标记该源，不阻断其他源（design.md §6.1）。
+
+    返回"数据源名 → 记录列表"的映射与各源状态。飞书群消息（v2.3）只在配置启用时
+    加入计划，否则连数据源徽章都不会出现，默认行为与 v2.2 完全一致。
+    """
 
     plan = [
         (SOURCE_COMMIT, github_commit.collect),
         (SOURCE_ISSUE, github_issue.collect),
         (SOURCE_DISCUSSION, github_discussion.collect),
     ]
+    if config.sources.feishu.enabled:
+        plan.append((SOURCE_FEISHU, feishu_message.collect))
     results: dict[str, list] = {}
     statuses: list[SourceStatus] = []
     for name, collector in plan:
@@ -160,15 +178,27 @@ def _collect_all(
             statuses.append(SourceStatus(name=name, ok=False, count=0, error=str(exc)))
             results[name] = []
             continue
-        logger.info("source_collected", source=name, count=len(records))
-        statuses.append(SourceStatus(name=name, ok=True, count=len(records)))
+        count = _source_count(name, records)
+        logger.info("source_collected", source=name, count=count)
+        statuses.append(SourceStatus(name=name, ok=True, count=count))
         results[name] = records
-    return (
-        results[SOURCE_COMMIT],
-        results[SOURCE_ISSUE],
-        results[SOURCE_DISCUSSION],
-        statuses,
-    )
+    return results, statuses
+
+
+def _source_count(name: str, records: list) -> int:
+    """徽章条数：飞书源报"消息总条数"，其余源报记录条数。"""
+
+    if name == SOURCE_FEISHU:
+        return feishu_message.total_messages(records)
+    return len(records)
+
+
+def _recent_stats(storage: Storage) -> list[ReportStats]:
+    """最近几期已保存日报的结构化统计（升序、不含当日；旧行没有统计列时跳过）。"""
+
+    entries = storage.list_reports(limit=RECENT_LIMIT)
+    stats = [entry.to_stats() for entry in entries]
+    return [item for item in reversed(stats) if item is not None]
 
 
 def _effective_members(
@@ -302,6 +332,22 @@ def _run_checks(config: Config, logger: JsonLineLogger) -> int:
         signing=bool(config.notify.lark_bot.secret),
         hint="用 --test-lark 可发一条自检消息验证通道",
     )
+
+    if config.sources.feishu.enabled:
+        try:
+            with feishu_message.build_client(config) as client:
+                client.tenant_access_token()
+            logger.info(
+                "check_feishu",
+                ok=True,
+                app_id=config.sources.feishu.app_id,
+                chats=len(config.sources.feishu.chats),
+            )
+        except CollectorError as exc:
+            logger.info("check_feishu", ok=False, detail=str(exc))
+            problems.append(f"飞书群消息数据源检查失败: {exc}")
+    else:
+        logger.info("check_feishu", ok=True, detail="未启用飞书群消息数据源，跳过")
 
     if problems:
         for problem in problems:
