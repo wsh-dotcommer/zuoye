@@ -42,6 +42,7 @@ class CommitRecord:
     additions: int
     deletions: int
     files_changed: int
+    files: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
