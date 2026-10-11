@@ -160,6 +160,18 @@ h2 { margin-bottom: 0; font-size: 19px; font-weight: 700; line-height: 1.4; }
 .chips li.ok { border-color: #cfe3d9; background: var(--accent-soft); color: var(--accent); }
 .chips li.failed { border-color: #e3b7b2; background: var(--danger-soft); color: var(--danger); }
 
+/* v2.3：头部补充行（飞书群汇总、对比上期、近 N 期趋势） */
+.head-lines { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 0; margin: 12px 0 0; }
+.head-lines li { color: var(--ink-soft); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* v2.3：索引页近 N 期趋势（内联 SVG，零 JS、零外部资源） */
+.trend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+.trend-chart { margin: 0; }
+.trend-chart figcaption { margin-bottom: 6px; color: var(--ink-muted); font-size: 12px; font-weight: 650; letter-spacing: .06em; }
+.trend-chart svg { display: block; width: 100%; height: 96px; }
+.trend-chart rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1; }
+.trend-chart text { fill: var(--ink-muted); font-size: 9px; font-variant-numeric: tabular-nums; }
+
 /* 成员板块 */
 .block { margin-top: 18px; padding-top: 18px; border-top: 1px solid #edf1ee; }
 .block:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
@@ -426,14 +438,14 @@ h3 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .01em; }
           <span class="brand-context">由 GitHub 数据自动生成</span>
         </div>
       </div>
-      <div class="local-note"><span class="local-dot" aria-hidden="true"></span><span>只读快照 · 2026-10-01 11:06</span></div>
+      <div class="local-note"><span class="local-dot" aria-hidden="true"></span><span>只读快照 · 2026-10-11 17:10</span></div>
     </div>
   </header>
   <main class="page">
     <section class="page-intro">
       <p class="eyebrow">Daily report archive</p>
       <h1>每一期的日报，都在这里。</h1>
-      <p class="intro-copy">红豆的研发团队 · 共 3 期日报 · 点击任意一期查看当天详情</p>
+      <p class="intro-copy">王帅豪 · 共 5 期日报 · 点击任意一期查看当天详情</p>
     </section>
     <div id="workbench" hidden>
       <section class="workspace" aria-label="日报工作台">
@@ -469,6 +481,8 @@ h3 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .01em; }
             <label class="field-label" for="workbench-load">从自动日报载入</label>
             <select class="select-input" id="workbench-load" name="workbench-load">
               <option value="">选择一期自动日报…</option>
+              <option value="2026-10-11">2026-10-11</option>
+              <option value="2026-10-01">2026-10-01</option>
               <option value="2026-09-30">2026-09-30</option>
               <option value="2026-09-26">2026-09-26</option>
               <option value="2026-09-25">2026-09-25</option>
@@ -530,6 +544,30 @@ h3 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .01em; }
       </div>
       <ul class="history-list">
         <li>
+          <a class="history-item" href="daily-report-2026-10-11.html">
+            <span class="history-info">
+              <span class="history-date">2026-10-11</span>
+              <span class="history-meta">1 名成员</span>
+            </span>
+            <span class="history-actions">
+              <span class="history-meta">生成于 2026-10-11 17:10</span>
+              <span class="button button-secondary button-small">查看</span>
+            </span>
+          </a>
+        </li>
+        <li>
+          <a class="history-item" href="daily-report-2026-10-01.html">
+            <span class="history-info">
+              <span class="history-date">2026-10-01</span>
+              <span class="history-meta">1 名成员</span>
+            </span>
+            <span class="history-actions">
+              <span class="history-meta">生成于 2026-10-11 09:49</span>
+              <span class="button button-secondary button-small">查看</span>
+            </span>
+          </a>
+        </li>
+        <li>
           <a class="history-item" href="daily-report-2026-09-30.html">
             <span class="history-info">
               <span class="history-date">2026-09-30</span>
@@ -567,10 +605,10 @@ h3 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .01em; }
         </li>
       </ul>
     </section>
-    <footer class="footer">由智能日报生成器生成 · 2026-10-01 11:06</footer>
+    <footer class="footer">由智能日报生成器生成 · 2026-10-11 17:10</footer>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite" data-visible="false"></div>
-  <script id="workbench-data" type="application/json">{"reports": [{"date": "2026-09-30", "markdown": "# 智能日报 · 2026-09-30\n\n- 团队：红豆的研发团队\n- 生成时间：2026-09-30 14:16\n- 数据源：代码提交 1 条 · 任务进展 0 条 · 协作沟通 0 条\n- 工时：团队合计 0.5h · 人均 0.5h（按提交时间推导，非真实考勤）\n\n## 红豆（wsh-dotcommer）\n\n### 代码提交\n- `wsh-dotcommer/zuoye` Add files via upload（+286/-88，1 个文件）\n\n### 任务进展\n- 今日无记录\n\n### 工时统计\n- 工时：0.5h（1 条提交，1 个工作段）\n\n### 协作沟通\n- 今日无记录\n"}, {"date": "2026-09-26", "markdown": "# 智能日报 · 2026-09-26\n\n- 团队：红豆的研发团队\n- 生成时间：2026-10-01 11:06\n- 数据源：代码提交 11 条 · 任务进展 2 条 · 协作沟通 2 条\n- 工时：团队合计 2.5h · 人均 2.5h（按提交时间推导，非真实考勤）\n\n## 红豆（wsh-dotcommer）\n\n### 代码提交\n- `wsh-dotcommer/zuoye` feat: SDD 复现智能日报生成器 v1.1（含工时统计与静态日报站）（+6220/-0，53 个文件）\n- `wsh-dotcommer/zuoye` chore: 同步本地改动（+83/-2，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+281/-276，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+12/-9，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+172/-14，7 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+142/-29，1 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+48/-3，1 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+79/-11，3 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+185/-0，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+7/-6，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+13/-7，2 个文件）\n\n### 任务进展\n- test：新建 → 进行中\n- text2：新建 → 进行中\n\n### 工时统计\n- 工时：2.5h（11 条提交，2 个工作段）\n\n### 协作沟通\n- [wsh-dotcommer/zuoye #1] wsh-dotcommer：测试一下懂得都懂\n- [wsh-dotcommer/zuoye #2] wsh-dotcommer：hhhhh\n"}, {"date": "2026-09-25", "markdown": "# 智能日报 · 2026-09-25\n\n- 团队：红豆的研发团队\n- 生成时间：2026-09-26 15:05\n- 数据源：代码提交 3 条 · 任务进展 3 条 · 协作沟通 4 条\n- 工时：团队合计 1h · 人均 1h（按提交时间推导，非真实考勤）\n\n## 红豆（wsh-dotcommer）\n\n### 代码提交\n- `wsh-dotcommer/zuoye` Add files via upload（+0/-0，1 个文件）\n- `wsh-dotcommer/zuoye` Create README.md（+1/-0，1 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+1/-0，1 个文件）\n\n### 任务进展\n- great：进行中 → 已完成\n- creat：进行中 → 已完成\n- TEXT：进行中 → 已完成\n\n### 工时统计\n- 工时：1h（3 条提交，1 个工作段）\n\n### 协作沟通\n- [wsh-dotcommer/zuoye #1] wsh-dotcommer：你好\n- [wsh-dotcommer/zuoye #2] wsh-dotcommer：这条评论用来验证协作沟通板块\n- [wsh-dotcommer/zuoye #1] wsh-dotcommer：wadwada\n- [wsh-dotcommer/zuoye #3] wsh-dotcommer：用做实验\n"}]}</script>
+  <script id="workbench-data" type="application/json">{"reports": [{"date": "2026-10-11", "markdown": "# 智能日报 · 2026-10-11\n\n- 团队：王帅豪（@wsh-dotcommer）\n- 生成时间：2026-10-11 17:10\n- 数据源：代码提交 7 条 · 任务进展 1 条 · 协作沟通 1 条 · 飞书消息 1 条\n- 工时：团队合计 1h · 人均 1h（按提交时间推导，非真实考勤）\n- 飞书群：sh 1 条 · 1 人发言\n\n### 代码提交\n- `wsh-dotcommer/zuoye` [df70d04](https://github.com/wsh-dotcommer/zuoye/commit/df70d04a62bf72fa5951d724c81c0f209fa64a85) Add files via upload（+1/-0，1 个文件：.abc.txt）\n- `wsh-dotcommer/zuoye` [4fd8d24](https://github.com/wsh-dotcommer/zuoye/commit/4fd8d246bafa04665b03954d5bcac5d3d9768886) Add files via upload（+14/-0，1 个文件：README.md）\n- `wsh-dotcommer/zuoye` [3d77978](https://github.com/wsh-dotcommer/zuoye/commit/3d77978412f5d025d6d6220942cb5d2af25dd3dc) Add files via upload（+203/-9，3 个文件：specs/design.md、specs/proposal.md、specs/tasks.md）\n- `wsh-dotcommer/zuoye` [6434bc9](https://github.com/wsh-dotcommer/zuoye/commit/6434bc95e3f19636e5823df5fb892c9fe76818a1) Add files via upload（+31/-2，2 个文件：tests/test_generator.py、tests/test_github_commit.py）\n- `wsh-dotcommer/zuoye` [f0abc72](https://github.com/wsh-dotcommer/zuoye/commit/f0abc725754a4422e3567d875fa2589496604ec9) Add files via upload（+17/-2，1 个文件：generator/formatter.py）\n- `wsh-dotcommer/zuoye` [34422b8](https://github.com/wsh-dotcommer/zuoye/commit/34422b8aac5c5c4f3f237b55b6748b7772c4a25f) Add files via upload（+1/-0，1 个文件：shared/models.py）\n- `wsh-dotcommer/zuoye` [b817230](https://github.com/wsh-dotcommer/zuoye/commit/b8172307ab22bd4c8f2ccafcf9baf4246c32d940) Add files via upload（+20/-4，1 个文件：collector/github_commit.py）\n\n### 任务进展\n- [#3](https://github.com/wsh-dotcommer/zuoye/issues/3) test：进行中 → 已完成（1 条评论）\n\n### 工时统计\n- 工时：1h（7 条提交，1 个工作段）\n\n### 协作沟通\n- [wsh-dotcommer/zuoye #3](https://github.com/wsh-dotcommer/zuoye/issues/3#issuecomment-6104380146) wsh-dotcommer：测试邮箱\n"}, {"date": "2026-10-01", "markdown": "# 智能日报 · 2026-10-01\n\n- 团队：红豆的研发团队\n- 生成时间：2026-10-11 09:49\n- 数据源：代码提交 11 条 · 任务进展 0 条 · 协作沟通 0 条\n- 工时：团队合计 0.5h · 人均 0.5h（按提交时间推导，非真实考勤）\n\n## 红豆（wsh-dotcommer）\n\n### 代码提交\n- `wsh-dotcommer/zuoye` Add files via upload（+221/-3，7 个文件）\n- `wsh-dotcommer/zuoye` Delete .env（+0/-10，1 个文件）\n- `wsh-dotcommer/zuoye` Delete config.book.yaml（+0/-53，1 个文件）\n- `wsh-dotcommer/zuoye` Delete config.demo.yaml（+0/-52，1 个文件）\n- `wsh-dotcommer/zuoye` Delete config.yaml（+0/-65，1 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+0/-0，0 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+70/-6，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+2075/-246，4 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+0/-0，0 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+2/-0，1 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+237/-1，3 个文件）\n\n### 任务进展\n- 今日无记录\n\n### 工时统计\n- 工时：0.5h（11 条提交，1 个工作段）\n\n### 协作沟通\n- 今日无记录\n"}, {"date": "2026-09-30", "markdown": "# 智能日报 · 2026-09-30\n\n- 团队：红豆的研发团队\n- 生成时间：2026-09-30 14:16\n- 数据源：代码提交 1 条 · 任务进展 0 条 · 协作沟通 0 条\n- 工时：团队合计 0.5h · 人均 0.5h（按提交时间推导，非真实考勤）\n\n## 红豆（wsh-dotcommer）\n\n### 代码提交\n- `wsh-dotcommer/zuoye` Add files via upload（+286/-88，1 个文件）\n\n### 任务进展\n- 今日无记录\n\n### 工时统计\n- 工时：0.5h（1 条提交，1 个工作段）\n\n### 协作沟通\n- 今日无记录\n"}, {"date": "2026-09-26", "markdown": "# 智能日报 · 2026-09-26\n\n- 团队：红豆的研发团队\n- 生成时间：2026-10-01 11:06\n- 数据源：代码提交 11 条 · 任务进展 2 条 · 协作沟通 2 条\n- 工时：团队合计 2.5h · 人均 2.5h（按提交时间推导，非真实考勤）\n\n## 红豆（wsh-dotcommer）\n\n### 代码提交\n- `wsh-dotcommer/zuoye` feat: SDD 复现智能日报生成器 v1.1（含工时统计与静态日报站）（+6220/-0，53 个文件）\n- `wsh-dotcommer/zuoye` chore: 同步本地改动（+83/-2，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+281/-276，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+12/-9，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+172/-14，7 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+142/-29，1 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+48/-3，1 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+79/-11，3 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+185/-0，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+7/-6，2 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+13/-7，2 个文件）\n\n### 任务进展\n- test：新建 → 进行中\n- text2：新建 → 进行中\n\n### 工时统计\n- 工时：2.5h（11 条提交，2 个工作段）\n\n### 协作沟通\n- [wsh-dotcommer/zuoye #1] wsh-dotcommer：测试一下懂得都懂\n- [wsh-dotcommer/zuoye #2] wsh-dotcommer：hhhhh\n"}, {"date": "2026-09-25", "markdown": "# 智能日报 · 2026-09-25\n\n- 团队：红豆的研发团队\n- 生成时间：2026-09-26 15:05\n- 数据源：代码提交 3 条 · 任务进展 3 条 · 协作沟通 4 条\n- 工时：团队合计 1h · 人均 1h（按提交时间推导，非真实考勤）\n\n## 红豆（wsh-dotcommer）\n\n### 代码提交\n- `wsh-dotcommer/zuoye` Add files via upload（+0/-0，1 个文件）\n- `wsh-dotcommer/zuoye` Create README.md（+1/-0，1 个文件）\n- `wsh-dotcommer/zuoye` Add files via upload（+1/-0，1 个文件）\n\n### 任务进展\n- great：进行中 → 已完成\n- creat：进行中 → 已完成\n- TEXT：进行中 → 已完成\n\n### 工时统计\n- 工时：1h（3 条提交，1 个工作段）\n\n### 协作沟通\n- [wsh-dotcommer/zuoye #1] wsh-dotcommer：你好\n- [wsh-dotcommer/zuoye #2] wsh-dotcommer：这条评论用来验证协作沟通板块\n- [wsh-dotcommer/zuoye #1] wsh-dotcommer：wadwada\n- [wsh-dotcommer/zuoye #3] wsh-dotcommer：用做实验\n"}]}</script>
   <script>/* 日报工作台（specs/design.md §4.3、ADR-008，v2.0）。
 
    纯前端：不联网、不上传、不写回 GitHub；手写草稿只存在浏览器 localStorage。
