@@ -23,7 +23,7 @@ python -m venv .venv
 Copy-Item config.yaml.example config.yaml    # 按需修改仓库与成员映射
 Copy-Item .env.example .env                  # 按需填入凭据（.env 已被 gitignore）
 
-# 3. 体检：配置、环境变量、GitHub / SMTP / 飞书 Webhook
+# 3. 体检：配置、环境变量、GitHub / SMTP / 飞书 Webhook / 飞书群消息数据源
 .\.venv\Scripts\python.exe main.py --check
 
 # 4. 干跑：采集 + 生成 + 站点渲染，不推送
@@ -146,6 +146,73 @@ report:
 - 一条提交最多列 **10 个**文件名，超出时在第 10 个后补 `、…`；前面的"12 个文件"仍是真实总数。
 - 文件名与增删行数来自**同一次**提交详情请求，不额外发起请求，也不影响 GitHub 限流预算。
 - 受 `sources.github.max_commit_details`（默认 100）约束：超出预算的提交取不到详情，条目退回只报数量的旧格式；详情请求失败的提交同理。
+
+## 条目链接与任务上下文（v2.2）
+
+日报的每条记录都能点进 GitHub 对应页面：
+
+```
+- `wsh-dotcommer/zuoye` [df70d04](https://github.com/wsh-dotcommer/zuoye/commit/df70d04…) Add files via upload（+1/-0，1 个文件：.abc.txt）
+- [#3](https://github.com/wsh-dotcommer/zuoye/issues/3) test：进行中 → 已完成（1 条评论）
+- [wsh-dotcommer/zuoye #3](https://github.com/wsh-dotcommer/zuoye/issues/3#issuecomment-…) wsh-dotcommer：测试邮箱
+```
+
+四条口径：
+
+- 链接与上下文信息（短 SHA、Issue 编号、评论地址、标签、评论数）都取自采集时**已经在请求**的同一批 GitHub 响应，不额外发请求。
+- 任务行括号里依次是「标签、指派、评论数」；没有的项不显示，指派人与该段落成员相同时也不重复写名字。
+- 缺链接时提交行只留短号、任务行只留 `#编号`；两者都没有时整段省略，不会出现空的 `[]()`。
+- 团队只有一位成员时，头部写成 `- 团队：姓名（@username）` 并省略重复的成员标题；多人团队保持原样。
+
+站点页与邮件里这些是真正的 `<a>` 链接（新窗口打开），飞书卡片由 `lark_md` 渲染同一串 Markdown 链接。
+
+## 趋势与对比（v2.3）
+
+日报头部会多出两行（有历史数据时才出现）：
+
+```
+- 对比上期（2026-10-01）：提交 +7 · 任务 +1 · 沟通 +1 · 工时 +0.5h
+- 近 7 期：提交 ▁▂▃▅▂▃█（25 条） · 工时 ▁▂▃▅▂▃█（6.5h）
+```
+
+- 「对比上期」的基数是**上一期已生成的日报**（不是严格的"昨天"）：周末与节假日不生成日报，写死昨天会经常没有基准。
+- 「近 N 期」最多 7 期，用 8 档块字符画迷你趋势；不足两期（只有当期一个点）时不显示。
+- 站点索引页会多出一个"近 N 期趋势"区块，两张手写内联 SVG 柱状图（提交数、工时）。**零 JS、零外部资源**，禁用脚本也能看。
+- 这些数字来自 `data/reports.sqlite3` 新增的结构化统计列，不再需要解析 Markdown；老库会在启动时自动补齐这些列，旧记录显示为"无可比数据"（跳过，不按 0 计算）。
+
+## 把飞书群消息接入日报（v2.3）
+
+飞书在这里的角色多了一个：除了推送，还可以**只读地**统计指定群的活跃度（**只统计条数与发言人数，不采集正文**）。
+
+前提：群自定义机器人只能写不能读，所以读取需要**企业自建应用**。
+
+1. 打开 [open.feishu.cn](https://open.feishu.cn) 开发者后台 → 创建**企业自建应用** → 拿到 `App ID` 与 `App Secret`。
+2. 权限管理里开通读取群消息的权限（`im:message` / `im:message:readonly` 一类，视当期权限命名而定），并按提示完成发布或管理员审批。
+3. 把应用机器人**加进目标群**，并拿到群的 `chat_id`（`oc_` 开头）。
+4. 填凭据与群号：
+   ```
+   # .env
+   FEISHU_APP_ID=cli_xxxxxxxx
+   FEISHU_APP_SECRET=xxxxxxxx
+   ```
+   ```yaml
+   # config.yaml
+   sources:
+     feishu:
+       enabled: true
+       chats:
+         - id: oc_xxxxxxxxxxxxxxxx
+           name: 智能日报
+   ```
+5. 体检：`main.py --check` 会多一条 `check_feishu`，能拿到 `tenant_access_token` 就算通过。
+6. 正常跑一天，日报头部会出现 `- 飞书群：智能日报 12 条 · 3 人发言`，数据源徽章多一条 `飞书消息 12 条`。
+
+四件必须知道的事：
+
+- **正文永不落盘**：采集器只数条数与发言人数，消息内容不写模型、不进 SQLite、不进 `logs/`，也不进任何页面。`docs/` 发布后是公开页面，这一点没有开关可放宽。
+- **默认关闭**：`enabled: false` 时采集计划里没有这一项，程序行为与 v2.2 完全一致。
+- **失败只影响自己**：权限被收回或群被解散，只会让"飞书消息"这一路显示"数据获取失败"，不影响 GitHub 三个板块与推送。
+- **机器人发言与系统消息不计入**：统计口径是"真人发的普通消息"。
 
 ## 发布静态日报站（GitHub Pages）
 

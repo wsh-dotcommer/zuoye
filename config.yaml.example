@@ -38,6 +38,16 @@ sources:
     retry_interval_seconds: 5
     rate_limit_max_wait_seconds: 300
     timeout_seconds: 15
+  feishu:                            # v2.3：飞书群消息作为只读数据源（只统计条数与人数）
+    enabled: false                   # 默认关闭；填好下面的凭据与群 id 后再改成 true
+    app_id: ${FEISHU_APP_ID}         # 填在 .env：企业自建应用的 App ID
+    app_secret: ${FEISHU_APP_SECRET} # 填在 .env：企业自建应用的 App Secret
+    base_url: https://open.feishu.cn
+    chats:                           # 要统计的群；id 是 chat_id（oc_ 开头），name 只用于日报展示
+      - id: oc_xxxxxxxxxxxxxxxx
+        name: 智能日报
+    retry_times: 3
+    timeout_seconds: 15
 
 report:
   output_dir: output                 # Markdown / HTML 日报输出目录
