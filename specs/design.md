@@ -1,6 +1,6 @@
 # 智能日报生成器 — 架构设计
 
-规范版本：v1.2（与 `specs/proposal.md` 对应）
+规范版本：v2.1（与 `specs/proposal.md` v2.1 对应）
 
 ## 变更记录
 
@@ -10,6 +10,9 @@
 | v1.1 | 需求变更（由 proposal.md v1.1 传导） | §2 生成层新增 `hours.py`；§3 新增 `WorkHoursRecord` 并扩展 `MemberReport`/`DailyReport`；§4.2 新增 `derive()` 契约并扩展 `generate()`；§5 新增 ADR-006；§6 新增口径与诚实性约束 |
 | v1.1.1 | 缺陷修复（起点为代码，逆向回溯更新本文件） | §6.2 密钥管理补全：程序自动加载 `.env`（配置同目录与当前目录），优先级「真实环境变量 > `.env`」；占位符解析为空值视同缺失，由 `--check` 报出变量名。需求边界未变，故 `proposal.md` 不升版 |
 | v1.2 | 需求澄清（由 proposal.md v1.2 传导） | §2 明确推送层的签名与自检职责；§4.4 新增 `check()` 契约与签名要求；§5 新增 ADR-007；§6.1/§6.3 增加飞书通道的失败处理与自检（配置模型仅新增可选字段 `notify.lark_bot.secret`，不影响既有数据模型） |
+| v1.2.1 | 实现细节变更（起点为代码，逆向回溯更新本文件） | 站点与邮件的模板、样式改用参考页的设计体系（页头品牌区、衬线标题、卡片式历史列表、数据源徽章、虚线空状态；仍为零 JS、零外部资源）；`generator/templates/` 与 `assets/style.css` 重写，并修复模板中样式被自动转义导致字体栈失效的缺陷。§2 模块职责、§3 数据模型、§4 接口契约、§4.3 产物清单与四板块文案均未变，故 `proposal.md` 与 `tasks.md` 不升版 |
+| v2.0 | 需求变更（由 proposal.md v2.0 传导） | §2 生成层职责扩展为"渲染页面载荷与工作台脚本"；§3 新增页面载荷与本地草稿结构；§4.3 扩展站点层契约（`interactive`、`markdown`、`SiteConfig.workbench`、载荷转义规则）；§5 新增 ADR-008（交互放浏览器端，不加服务、不加 Actions）；§6 增加工作台的安全与可用性约束。采集层、工时推导、推送层契约不变 |
+| v2.1 | 需求变更（由 proposal.md v2.1 传导） | §3 `CommitRecord` 新增 `files` 字段（变更文件名）；§4.1 明确文件名复用同一次提交详情请求、不额外占用限流预算；§4.2 新增「代码提交」条目的文件名口径（最多 10 个 + `…`，无文件名退回旧格式）。采集窗口、工时推导、站点层与推送层契约不变 |
 
 ## 1. 系统架构
 
@@ -42,7 +45,7 @@
 | 模块 | 文件 | 负责 | 不负责 |
 | --- | --- | --- | --- |
 | collector/ | `github_commit.py`<br>`github_issue.py`<br>`github_discussion.py` | 从 GitHub REST API 获取原始数据：提交记录、Issue 状态变更、PR/Issue 讨论；做字段标准化与配置级过滤 | 不做日报排版、不做成员聚合决策、不做推送 |
-| generator/ | `formatter.py`<br>`hours.py`<br>`template.py`<br>`site.py` | 按成员聚合原始记录、编排日报板块、从提交时间推导工时（会话法）、生成 Markdown 与 HTML、渲染静态日报站（索引页+详情页） | 不做数据采集、不调用外部 API、不做推送 |
+| generator/ | `formatter.py`<br>`hours.py`<br>`template.py`<br>`site.py` | 按成员聚合原始记录、编排日报板块、从提交时间推导工时（会话法）、生成 Markdown 与 HTML、渲染静态日报站（索引页+详情页）、把日报正文序列化为页面内联载荷并内联工作台脚本（`templates/workbench.js`） | 不做数据采集、不调用外部 API、不做推送、不提供任何服务端接口 |
 | notifier/ | `email.py`<br>`lark_bot.py` | 将日报推送给目标：SMTP 邮件发送、飞书群机器人消息推送（含可选签名校验与连通性自检） | 不做数据处理、不做日报生成、不做数据采集 |
 | shared/ | `config.py`<br>`logger.py`<br>`errors.py`<br>`http.py`<br>`filters.py`<br>`models.py`<br>`storage.py` | 跨模块共享能力：配置读取与校验、JSON Lines 日志、自定义异常与错误处理策略、HTTP 重试/限流策略、机器人账号过滤规则、数据模型定义、SQLite 日报历史 | 不包含业务规则、不感知具体数据源字段、不负责编排 |
 | main.py | `main.py` | 编排入口：按顺序调用采集层→生成层→站点层→推送层，处理全局异常与工作日判断，记录执行状态 | 不实现采集/生成/推送细节 |
@@ -64,6 +67,7 @@
 | additions | int | 新增行数 |
 | deletions | int | 删除行数 |
 | files_changed | int | 变更文件数 |
+| files | tuple[str, ...] | 变更文件名（v2.1 新增；来自提交详情端点的 `files` 数组，GitHub 单次最多返回 300 个；未取详情统计的提交为空元组） |
 
 ### TaskRecord（任务变更记录）
 
@@ -128,6 +132,31 @@
 | count | int | 采集到的记录条数 |
 | error | str | 失败原因（成功时为空串） |
 
+### WorkbenchPayload（页面内联载荷，v2.0 新增）
+
+渲染时序列化进页面 `<script id="workbench-data" type="application/json">` 的只读数据，供工作台脚本在浏览器本地使用，不产生任何网络请求。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| reports | list[dict] | 可载入的日报列表；索引页为全部历史期数，详情页只有当期一条 |
+| reports[].date | str | 日报日期（`YYYY-MM-DD`） |
+| reports[].markdown | str | 该期日报的 Markdown 原文 |
+
+序列化规则：`<`、`>`、`&` 一律转成 JSON 的 `\uXXXX` 形式，保证正文里的 `</script>` 等序列无法提前闭合脚本标签。
+
+### DraftRecord（本地草稿，v2.0 新增，仅存在于浏览器）
+
+保存在使用者浏览器 `localStorage`（键 `daily-report-workbench:history:v1`）中的手写日报记录，**不进入 SQLite、不进入仓库、不参与推送**。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | str | 记录标识（`日期-时间戳`） |
+| date | str | 日报日期（同日期重复生成时覆盖旧记录） |
+| savedAt | int | 保存时间（毫秒时间戳） |
+| report | str | 手写日报正文（Markdown 格式） |
+
+约束：最多保留 50 条；列表按 `savedAt` 倒序展示；详情页到索引页的跳转中转使用键 `daily-report-workbench:pending:v1`（单条 `{date, report}`），工作台读取后立即删除。
+
 ## 4. 接口契约
 
 ### 4.1 采集层
@@ -140,6 +169,7 @@ collect(config: Config, start: datetime, end: datetime) -> list[CommitRecord | T
 - 失败时抛出 `CollectorError`，由编排层捕获并写入 `SourceStatus`，采集器自身不打印业务流程决策。
 - 采集器必须支持分页（GitHub 默认每页 30~100 条），并在共享层 `http.py` 中统一实现超时重试与限流等待。
 - 限流预算：单次运行的"逐条提交统计"与"Issue timeline 查询"数量分别由 `max_commit_details`、`max_issue_timelines` 限制；超出上限后退化为零统计或按 `closed_at`/`created_at` 字段推断，并记录警告日志。
+- 变更文件名（v2.1）：与"增删行数、变更文件数"来自**同一次**提交详情请求，采集器只做字段映射，不额外发起请求、不额外占用限流预算；超出 `max_commit_details` 上限或详情请求失败的提交，`files` 为空元组，提交记录本身仍然保留。
 - 任务进展只统计**真正的 Issue**：GitHub 的 `issues` 端点会同时返回 Pull Request（带 `pull_request` 字段），采集器显式跳过它们，避免与"代码提交"板块重复计数；PR 的产出通过提交与评审评论体现。
 - 去重口径：同一个 Issue 在**同一次运行**里只保留窗口内**最后一次**状态变更（例如"上午新建、下午关闭"只会输出「进行中 → 已完成」），避免同一条任务在日报里刷屏；若希望两次变更分别出现，请分两次运行。
 
@@ -156,6 +186,7 @@ generate(
 - 生成层不访问网络、不读写文件、不做去重之外的业务判断。
 - v1.1 起 `timezone_name` 与 `hours_rules` 为**仅关键字参数且带默认值**，旧调用无需改动（回归约束）。
 - 渲染规则：成员段落固定按"代码提交→任务进展→工时统计→协作沟通"四节输出；空数据节输出"今日无记录"；`source_statuses` 中失败的数据源在对应节输出"数据获取失败（原因）"；工时不可用时输出"工时数据不可用（原因）"。
+- 「代码提交」条目格式（v2.1）：`` - `repo` message（+A/-D，N 个文件：f1、f2、…） ``；文件名最多列 10 个（常量 `COMMIT_FILE_LIMIT`，超出时在第 10 个后追加 `、…`，数量已在前文给出、不重复计数）；`files` 为空时退回 `（+A/-D，N 个文件）`，不出现空冒号。文件名不加反引号，`&`/`<`/`>` 交由既有 Markdown / HTML 转义处理；Markdown、站点详情页与邮件正文共用这一份文本，因此三端自动一致。
 - 日报头部增加汇总行：`工时：团队合计 X.Xh · 人均 Y.Yh（按提交时间推导，非真实考勤）`，人均 = 合计 ÷ 成员数。
 
 工时推导契约（v1.1 新增，纯计算，不访问网络）：
@@ -174,11 +205,19 @@ derive(members, commits, window, timezone_name: str, rules: HoursRules) -> dict[
 
 ```python
 render_site(report: DailyReport, history: list[HistoryEntry], site_config: SiteConfig) -> list[Path]
+render_report_html(view, *, back_link=False, markdown=None, interactive=False) -> str   # v2.0 扩展
+render_index_html(entries, *, site_title, team_name, generated_at, interactive=True) -> str   # v2.0 扩展
+render_workbench_js() -> str   # v2.0 新增
+render_workbench_data(view_or_entries, markdown=None) -> str   # v2.0 新增
 ```
 
 - 输入当日日报、历史条目（来自 SQLite）与站点配置，输出写入的文件路径列表。
 - 产物：`<site_dir>/index.html`、`<site_dir>/daily-report-YYYY-MM-DD.html`、`<site_dir>/assets/style.css`、`<site_dir>/.nojekyll`。
 - 索引条目按日期倒序排列；历史中缺少对应详情页文件的日期自动跳过。
+- 工作台（v2.0）：`interactive=True` 时，页面在末尾内联工作台脚本与 JSON 载荷；脚本与载荷都不新增产物文件，站点仍是"四个文件 + 无后端"。
+- 邮件纯净性（v2.0）：邮件正文走 `render_report_html` 的默认 `interactive=False`，因此不含脚本、不含复制/载入按钮；`render_index_html` 的 `interactive` 默认 `True`，只有站点索引页会渲染工作台。
+- 载荷范围（v2.0）：索引页内联的期数等于索引条目数（受 `main.py` 的 `HISTORY_LIMIT` 约束），因此"从自动日报载入"下拉不会出现没有内容的日期。
+- 关闭开关（v2.0）：`SiteConfig.workbench=False`（来自配置 `report.workbench`）时，模板不渲染工作台区块与脚本，页面回到 v1.x 的纯只读形态。
 
 ### 4.4 推送层
 
@@ -319,6 +358,24 @@ check(target: LarkBotTarget) -> tuple[bool, str]      # v1.2
 
 **代价**：① 换群要重新配 Webhook；② 不能读飞书消息，所以飞书无法反过来当数据源（与 proposal 2.2 一致）；③ 安全设置若选「签名校验」，载荷必须带 `timestamp`/`sign`，否则飞书返回 19021——已由 §4.4 的签名契约覆盖；④ 机器人被移出群或停用后推送会静默失败，因此提供 `--test-lark` 让接入方在正式推送前发现通道已断。
 
+### ADR-008：工作台交互放在浏览器端，而不是加服务或 CI（v2.0）
+
+**状态**：已采纳
+
+**背景**：v2.0 要求在页面上提供表单、复制与本地历史。可选路径有三条：加一个常驻 Web 服务提供生成接口；用 GitHub Actions 在网页上触发云端重新生成；把交互全部放在浏览器本地。
+
+**选项**
+
+| 选项 | 优点 | 缺点 |
+| --- | --- | --- |
+| 常驻 Web 服务 | 表单可以真正调用采集与生成 | 与 proposal §2.2"不做常驻 Web 服务"冲突；需要服务器、端口、鉴权与运维 |
+| 网页触发 GitHub Actions | 能复用采集逻辑 | 需要在网页里放触发凭据（等于公开密钥）或额外网关；引入 CI 与密钥，破坏"零密钥发布" |
+| 浏览器端工作台 | 零后端、零密钥、零新依赖；与静态站产物天然契合 | 表单产出的是"手写日报"，不能直接调用 GitHub 采集；草稿只在本机 |
+
+**决策**：交互全部放在浏览器端，用渲染时内联的 JSON 载荷驱动，页面不发起任何网络请求。
+
+**理由**：1）`docs/` 的发布路径仍是"GitHub Pages + main/docs"，不引入服务、端口与密钥，交接成本最低；2）自动日报仍由定时任务生成，工作台只负责"人工整理与补充"，两者职责不混；3）代价是"手写内容不能自动合并进自动日报、草稿不跨设备"，因此把这两点写进 proposal §2.2 的排除项，并在页面上明示"内容不会上传"。
+
 ## 6. 非功能性约束
 
 ### 6.1 错误处理策略（优雅降级）
@@ -359,3 +416,13 @@ check(target: LarkBotTarget) -> tuple[bool, str]      # v1.2
 2. **不做考核用途**：推导值仅用于观察工作节奏；proposal 已明确排除"工时与考核挂钩"的计算。
 3. **参数显式可配**：切分间隔、收尾时长、四舍五入网格、单日上限全部写在配置文件中，便于团队按实际节奏调整，而不是硬编码在代码里。
 4. **本地计算**：工时推导不产生任何额外的 GitHub API 请求，不影响限流预算。
+
+### 6.5 工作台安全与可用性（v2.0 新增）
+
+1. **不新增攻击面**：页面不发请求、不写仓库、不引入第三方脚本与外部资源（无 CDN、无字体、无图片），`docs/` 仍只由四个文件组成。
+2. **载荷转义**：内联 JSON 载荷中的 `<`、`>`、`&` 一律转义为 `\uXXXX`，日报正文里的 `</script>` 等序列无法逃出脚本标签（对应单测：注入 `</script><script>alert(1)</script>` 后页面不含该原始序列）。
+3. **一律纯文本渲染**：工作台与本地草稿列表只用 `textContent` 与 `document.createElement` 构造 DOM，禁止把用户输入或日报正文交给 `innerHTML`。
+4. **草稿不外传**：手写草稿只写浏览器 `localStorage`，不进入 SQLite、不进入仓库、不参与飞书与邮件推送；页面上固定展示"内容不会上传"的提示。
+5. **渐进增强**：工作台区块默认带 `hidden`，脚本就绪后才显示；脚本被禁用时页面退回 v1.x 的只读形态。`localStorage` 不可用（隐私模式）时，工作台仍可生成与复制，但改成提示"草稿只在本次会话内有效"。
+6. **复制降级**：优先使用 Clipboard API；不可用时退回 `document.execCommand("copy")`；仍失败则选中内容并提示手动复制，不抛未捕获异常。
+7. **可关闭**：配置 `report.workbench: false` 可重新生成不含任何脚本的纯只读站点，作为团队不接受页面交互时的逃生开关。

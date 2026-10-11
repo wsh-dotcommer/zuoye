@@ -3,8 +3,8 @@
 ## 元信息
 
 - 关联规范：`specs/proposal.md`、`specs/design.md`
-- 任务总数：12（v1.1 新增 Task 11，v1.2 新增 Task 12）
-- 预计总执行时间：3 到 4h（包含测试）
+- 任务总数：16（v1.1 新增 Task 11，v1.2 新增 Task 12，v2.0 新增 Task 13/14/15，v2.1 新增 Task 16）
+- 预计总执行时间：4 到 6h（包含测试）
 - 执行策略：按依赖关系顺序执行，独立任务可并行执行
 - 相对书中的扩展点：书中采集层为 GitHub + 飞书任务 + 飞书消息，本期改为三个 GitHub 采集器（Task 3/4/5）；书中无静态站，本期把站点渲染并入生成层（Task 6）并在 Task 1 落地 `docs/` 与 Pages 基础文件。
 
@@ -16,6 +16,8 @@
 | v1.1 | 需求变更 | 新增 Task 11「实现工时推导模块」；修改 Task 6 验收标准（新增工时板块与布局顺序）；执行顺序插入"阶段 4：Task 11 → 阶段 5：Task 6" |
 | v1.1.1 | 缺陷修复 | 密钥注入失效：程序未加载 `.env`（只读系统环境变量），占位符空值未视为缺失；修复后 Task 9 补充两条验收标准 |
 | v1.2 | 需求澄清 | 新增 Task 12「接入飞书群机器人」；修改 Task 8 验收标准（新增签名校验与自检）；执行顺序追加"阶段 9：Task 12" |
+| v2.0 | 需求变更 | 新增 Task 13「实现工作台前端资源」、Task 14「页面接入工作台与载荷」、Task 15「工作台测试与文档回归」；Task 6 的产物清单不变（仍是四个文件）；执行顺序追加"阶段 10–12" |
+| v2.1 | 需求变更 | 新增 Task 16「日报列出提交变更文件名」；修改 Task 3 的验收标准（`CommitRecord` 字段数 7 → 8）；执行顺序追加"阶段 13：Task 16" |
 
 ---
 
@@ -74,7 +76,7 @@
 验收标准：
 
 - [ ] `collect()` 函数签名符合 design.md §4.1 的接口定义
-- [ ] 返回的每个 `CommitRecord` 包含全部 7 个字段且类型正确
+- [ ] 返回的每个 `CommitRecord` 包含全部 8 个字段且类型正确（v2.1 起新增 `files`，即变更文件名元组）
 - [ ] 机器人账号的提交默认被排除（`exclude_bots: true`）
 - [ ] 支持分页查询（GitHub API 默认每页 30 条，本实现按 100 条分页直到取完）
 - [ ] 逐条提交的变更统计通过详情端点获取，并受 `max_commit_details` 上限保护
@@ -300,6 +302,98 @@ v1.1.1 补充验收标准（缺陷修复）：
 
 ---
 
+## Task 13: 实现工作台前端资源（新增 v2.0）
+
+描述：编写浏览器端工作台脚本，实现表单校验、手写日报生成、两级降级的复制、本地草稿（新增 / 载入 / 复制 / 删除 / 清空）、"从自动日报载入"下拉与详情页中转，并为这些控件补上样式组件。脚本不发起任何网络请求，草稿只写浏览器 localStorage。
+
+输入：`specs/design.md` §3（WorkbenchPayload、DraftRecord）、§4.3（站点层契约）、§6.5（工作台安全与可用性）、§5 ADR-008
+
+输出：`generator/templates/workbench.js` + `generator/templates/style.css`（工作台组件类）
+
+依赖：Task 6
+
+验收标准：
+
+- [ ] 手写日报输出固定格式：`# 工作日报 · YYYY-MM-DD` + `## 今日完成 / ## 明日计划 / ## 需要协助`，空小节写 `- 未填写`
+- [ ] 日期与"今日完成"为空时给出字段级错误提示并把焦点移到第一个出错字段
+- [ ] 复制优先用 Clipboard API，不可用时退回 `document.execCommand`，都失败则选中内容并提示手动复制
+- [ ] 本地草稿键为 `daily-report-workbench:history:v1`，同日期覆盖旧记录、按保存时间倒序、最多保留 50 条
+- [ ] 草稿支持载入、复制、删除单条与"清空全部"（二次确认）；localStorage 不可用时禁用相关操作并提示"草稿只在本次会话内有效"
+- [ ] "从自动日报载入"下拉能把选定日期的自动日报填进编辑框；详情页"载入到工作台"通过 `daily-report-workbench:pending:v1` 中转后跳回 `index.html#workbench`
+- [ ] 所有动态内容只用 `textContent` 与 `document.createElement` 渲染，脚本中不出现 `innerHTML`
+- [ ] 脚本内不内嵌 `</script` 序列（避免内联进页面时提前闭合标签），且 `node --check` 语法校验通过
+
+---
+
+## Task 14: 页面接入工作台与内联载荷（新增 v2.0）
+
+描述：把工作台接进站点页面：模板新增工作台区块（默认 `hidden`，脚本就绪后显示）、详情页操作行与脚本块；生成层把日报正文序列化为页面内联 JSON 载荷并按开关决定是否内联；配置新增逃生开关。
+
+输入：`specs/design.md` §3（WorkbenchPayload）、§4.3（站点层契约）、§6.5
+
+输出：`generator/templates/base.html.j2`、`generator/templates/index.html.j2`、`generator/templates/report.html.j2`、`generator/template.py`、`generator/site.py`、`shared/config.py`、`config.yaml.example`、`main.py`
+
+依赖：Task 13
+
+验收标准：
+
+- [ ] `render_report_html()` 支持 `markdown` 与 `interactive` 两个仅关键字参数，默认值保证旧调用（邮件正文）行为不变
+- [ ] `render_index_html()` 支持 `interactive`（默认 `True`），索引条目新增 `markdown` 字段供载荷使用
+- [ ] 新增 `render_workbench_js()` 与 `render_workbench_data()`，后者把 `<`、`>`、`&` 转义为 `\uXXXX`
+- [ ] `SiteConfig` 新增 `workbench` 字段，取值来自配置 `report.workbench`（默认 `true`）
+- [ ] `report.workbench: false` 时索引页与详情页都不含脚本与工作台区块，页面回到 v1.x 只读形态
+- [ ] 邮件正文走默认 `interactive=False`：不含 `<script`、不含"复制 Markdown"与"载入到工作台"按钮
+- [ ] 站点产物仍是 `index.html`、`daily-report-<date>.html`、`assets/style.css`、`.nojekyll` 四个文件
+- [ ] 索引页"从自动日报载入"下拉在服务端渲染出全部历史日期，脚本不可用时仍能看到有哪些期
+- [ ] `config.yaml.example` 与 README 说明 `report.workbench` 的含义
+
+---
+
+## Task 15: 工作台测试与文档回归（新增 v2.0）
+
+描述：为工作台补测试，更新受影响的站点与集成测试断言，跑全量回归并补充使用说明。
+
+输入：`specs/design.md` §4.3、§6.5，Task 13/14 的实现
+
+输出：`tests/test_workbench.py` + 更新后的 `tests/test_site.py`、`tests/test_integration.py` + `README.md`（工作台使用说明与隐私提示）
+
+依赖：Task 14
+
+验收标准：
+
+- [ ] `tests/test_workbench.py` 覆盖：工作台 UI 元素齐全、索引页载荷含全部历史日期、`<` 已转义、`</script>` 注入不能逃逸、详情页按钮与自身载荷、邮件正文无脚本、`report.workbench: false` 时无工作台、工作台脚本静态检查（含剪贴板兜底、无 `innerHTML`）
+- [ ] `tests/test_site.py` 的"Markdown 标记不残留"断言改为只检查正文区域（载荷位于末尾脚本标签内）
+- [ ] `tests/test_integration.py` 的正常、降级、空数据三个场景都断言工作台存在且页面自洽
+- [ ] `pytest` 全绿（v1.2 的 85 项一行不改 + 新增项全部通过）
+- [ ] `node --check generator/templates/workbench.js` 通过（本仓库无 `package.json`，`npm test` 不适用）
+- [ ] README 写明工作台的用法（填写 → 生成 → 复制 → 本地草稿 → 载入自动日报）、"内容不会上传"的隐私说明，以及 `report.workbench: false` 的关闭方式
+
+---
+
+## Task 16: 日报列出提交变更文件名（新增 v2.1）
+
+描述：把「代码提交」板块从"只报变更文件数"升级为"列出变更文件名"。文件名来自详情端点已经返回的 `files` 数组，因此只做字段映射与渲染，不新增 API 调用。
+
+输入：`specs/proposal.md` §2.1、§3.1（v2.1），`specs/design.md` §3（`CommitRecord.files`）、§4.1、§4.2（v2.1）
+
+输出：`shared/models.py`、`collector/github_commit.py`、`generator/formatter.py` + 更新后的 `tests/test_github_commit.py`、`tests/test_generator.py`
+
+依赖：Task 3、Task 6（两者均已完成）
+
+验收标准：
+
+- [ ] `CommitRecord` 新增 `files: tuple[str, ...]`，带默认值 `()`，未传该字段的既有调用不受影响
+- [ ] `files_changed` 语义不变（仍是详情端点返回的文件数），`files` 为其文件名元组
+- [ ] 详情请求失败或超出 `max_commit_details` 上限时，`files` 为空元组且提交记录本身保留
+- [ ] 文件名与增删行数来自同一次详情请求，不新增任何 HTTP 请求（限流预算不变）
+- [ ] 「代码提交」条目在有文件名时输出 `（+A/-D，N 个文件：f1、f2、…）`，最多 10 个，超出以 `、…` 结尾
+- [ ] `files` 为空时退回 `（+A/-D，N 个文件）`，不出现空冒号
+- [ ] Markdown、站点详情页与邮件正文三端显示一致（共用同一份已渲染文本，模板不改）
+- [ ] 单元测试覆盖：字段完整性、详情上限、详情失败、文件名截断、无文件名回退
+- [ ] `pytest` 全绿（本仓库无 `package.json`，本次不涉及 JS 改动，`npm test` 不适用）
+
+---
+
 ## 执行顺序
 
 推荐执行顺序（考虑依赖关系和并行机会）：
@@ -313,3 +407,7 @@ v1.1.1 补充验收标准（缺陷修复）：
 - 阶段 7：Task 9（主编排入口）
 - 阶段 8：Task 10（集成测试）
 - 阶段 9：Task 12（接入飞书群机器人：签名校验 + 自检，v1.2 新增）
+- 阶段 10：Task 13（工作台前端资源：脚本与样式组件，v2.0 新增）
+- 阶段 11：Task 14（页面接入工作台与内联载荷，v2.0 新增）
+- 阶段 12：Task 15（工作台测试、全量回归与 README，v2.0 新增）
+- 阶段 13：Task 16（日报列出提交变更文件名，v2.1 新增）
