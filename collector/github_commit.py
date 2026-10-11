@@ -63,9 +63,12 @@ def collect(config: Config, start: datetime, end: datetime) -> list[CommitRecord
                 if not (start <= moment < end):
                     continue
                 additions = deletions = files_changed = 0
+                files: tuple[str, ...] = ()
                 if details_fetched < github.max_commit_details:
                     details_fetched += 1
-                    additions, deletions, files_changed = _fetch_stats(client, repo, item, logger)
+                    additions, deletions, files_changed, files = _fetch_stats(
+                        client, repo, item, logger
+                    )
                 else:
                     logger.error(
                         "commit_details_limit_reached",
@@ -81,6 +84,7 @@ def collect(config: Config, start: datetime, end: datetime) -> list[CommitRecord
                         additions=additions,
                         deletions=deletions,
                         files_changed=files_changed,
+                        files=files,
                     )
                 )
     if bots_skipped:
@@ -93,23 +97,35 @@ def _fetch_stats(
     repo: RepoConfig,
     item: dict,
     logger: JsonLineLogger,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, tuple[str, ...]]:
+    """取单条提交的变更统计与变更文件名（复用同一次详情请求，不额外消耗限流预算）。"""
+
     sha = item.get("sha", "")
     if not sha:
-        return 0, 0, 0
+        return 0, 0, 0, ()
     try:
         detail = client.get_json(f"/repos/{repo.owner}/{repo.name}/commits/{sha}")
     except CollectorError as exc:
         # 单条提交统计失败不影响整条流水线，但必须留痕（design.md §6.1）
         logger.error("commit_stats_unavailable", repo=repo.full_name, sha=sha, error=str(exc))
-        return 0, 0, 0
+        return 0, 0, 0, ()
     stats = detail.get("stats") or {}
     files = detail.get("files") or []
+    names = tuple(name for name in (_file_name(entry) for entry in files) if name)
     return (
         int(stats.get("additions", 0)),
         int(stats.get("deletions", 0)),
         len(files),
+        names,
     )
+
+
+def _file_name(entry: dict) -> str:
+    """从详情端点的 files 条目里取文件名；结构异常时退化为空串（由调用方过滤）。"""
+
+    if not isinstance(entry, dict):
+        return ""
+    return str(entry.get("filename") or "").strip()
 
 
 def _commit_time(item: dict) -> datetime:
