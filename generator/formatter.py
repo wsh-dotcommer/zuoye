@@ -109,7 +109,7 @@ def build_view(report: DailyReport) -> dict:
     hours_enabled = any(member.work_hours is not None for member in report.members)
     single_member = len(report.members) == 1
     return {
-        "title": f"智能日报 · {report.date.isoformat()}",
+        "title": f"{report.team_name} 智能日报 · {report.date.isoformat()}",
         "date": report.date.isoformat(),
         "team_name": report.team_name,
         "team_label": _team_label(report, single_member),
