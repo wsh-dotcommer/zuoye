@@ -81,7 +81,10 @@ def test_markdown_contains_three_sections() -> None:
     report = _report()
     markdown = report.markdown
 
-    assert markdown.startswith("# 智能日报 · 2026-09-18")
+    assert markdown.startswith("# 测试团队 智能日报 · 2026-09-18")
+    # HTML 侧（邮件正文与站点页共用）的标题也要带团队名
+    assert "<h1>测试团队 智能日报 · 2026-09-18</h1>" in report.html
+    assert "<title>测试团队 智能日报 · 2026-09-18</title>" in report.html
     assert "## 红豆（wsh-dotcommer）" in markdown
     assert "## 张三（zhangsan）" in markdown
     assert "### 代码提交" in markdown
