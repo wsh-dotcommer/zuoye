@@ -280,6 +280,7 @@ def _push(config: Config, report, logger: JsonLineLogger) -> None:
             username=email_config.username,
             password=email_config.password,
             recipients=email_config.recipients,
+            subject_prefix=email_config.subject_prefix,
         )
         ok = email_notifier.send(report, target, logger=logger)
         logger.info("push_result", channel="email", ok=ok)
@@ -352,6 +353,7 @@ def _run_checks(config: Config, logger: JsonLineLogger) -> int:
                 username=email_config.username,
                 password=email_config.password,
                 recipients=email_config.recipients,
+                subject_prefix=email_config.subject_prefix,
             )
         )
         logger.info("check_smtp", ok=ok, detail=message)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import smtplib
+from dataclasses import replace
 from datetime import date, datetime, timezone
 
 from notifier import email as email_notifier
@@ -69,6 +70,34 @@ def test_send_builds_html_message() -> None:
     assert message.get_content_type() == "multipart/alternative"
     html_part = message.get_payload()[1]
     assert html_part.get_content_type() == "text/html"
+
+
+def test_subject_prefix_replaces_default_format() -> None:
+    """v2.4.1：配了 subject_prefix 时主题为「前缀 团队名 日期 智能日报」。"""
+
+    assert email_notifier.build_subject(_report(), "研一") == "研一 测试团队 2026-09-18 智能日报"
+    # 前缀里的多余空白被归一，主题里不出现连续空格
+    assert email_notifier.build_subject(_report(), "  研一  ") == "研一 测试团队 2026-09-18 智能日报"
+    assert email_notifier.build_subject(_report(), "研一  组") == "研一 组 测试团队 2026-09-18 智能日报"
+    assert (
+        email_notifier.build_subject(_report())
+        == "[测试团队] 2026-09-18 智能日报"
+    )  # 没配前缀时保持旧格式
+
+
+def test_send_uses_configured_subject_prefix() -> None:
+    fake = _FakeSmtp()
+    target = replace(TARGET, subject_prefix="研一")
+
+    ok = email_notifier.send(
+        _report(),
+        target,
+        smtp_factory=lambda _target: fake,
+        logger=None,
+    )
+
+    assert ok is True
+    assert fake.sent[0]["Subject"] == "研一 测试团队 2026-09-18 智能日报"
 
 
 def test_send_retries_twice_then_returns_false() -> None:

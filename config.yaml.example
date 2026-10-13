@@ -82,6 +82,7 @@ notify:
     port: 465
     use_ssl: true
     sender: bot@example.com
+    subject_prefix: ""                # 主题前缀：填了就是「前缀 团队名 日期 智能日报」，留空沿用「[团队名] 日期 智能日报」
     username: ${SMTP_USERNAME}
     password: ${SMTP_PASSWORD}
     recipients:

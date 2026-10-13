@@ -156,6 +156,7 @@ class EmailConfig:
     username: str
     password: str
     recipients: tuple[str, ...]
+    subject_prefix: str = ""
 
 
 @dataclass(frozen=True)
@@ -570,6 +571,7 @@ def _parse_notify(raw: Mapping[str, Any], original: Mapping[str, Any] | None = N
         username=str(email_raw.get("username", "")).strip(),
         password=str(email_raw.get("password", "")).strip(),
         recipients=_as_str_tuple(email_raw.get("recipients")),
+        subject_prefix=str(email_raw.get("subject_prefix", "")).strip(),
     )
     lark_bot = LarkBotConfig(
         enabled=bool(lark_raw.get("enabled", False)),

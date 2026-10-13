@@ -30,6 +30,8 @@ class EmailTarget:
     username: str
     password: str
     recipients: tuple[str, ...]
+    # v2.4.1：主题前缀，非空时主题改为 `<前缀>+<团队名>+<日期>+智能日报`
+    subject_prefix: str = ""
 
 
 SmtpFactory = Callable[[EmailTarget], ContextManager[smtplib.SMTP]]
@@ -65,12 +67,27 @@ def send(
 
 def _build_message(report: DailyReport, target: EmailTarget) -> EmailMessage:
     message = EmailMessage()
-    message["Subject"] = f"[{report.team_name}] {report.date.isoformat()} 智能日报"
+    message["Subject"] = build_subject(report, target.subject_prefix)
     message["From"] = target.sender
     message["To"] = ", ".join(target.recipients)
     message.set_content(report.markdown or "（日报内容为空）")
     message.add_alternative(report.html or "<p>（日报内容为空）</p>", subtype="html")
     return message
+
+
+def build_subject(report: DailyReport, prefix: str = "") -> str:
+    """邮件主题（v2.4.1）。
+
+    配了 `notify.email.subject_prefix` 时用 `<前缀> <团队名> <日期> 智能日报`
+    （例：`研一 王帅豪 2026-10-13 智能日报`）；没配时保持 v1.0 以来的
+    `[<团队名>] <日期> 智能日报`，向后兼容。
+    """
+
+    # 归一空格：写成「研一 组」也不会在主题里留下连续空格
+    clean = " ".join((prefix or "").split())
+    if clean:
+        return f"{clean} {report.team_name} {report.date.isoformat()} 智能日报"
+    return f"[{report.team_name}] {report.date.isoformat()} 智能日报"
 
 
 def check(
