@@ -18,7 +18,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from collector import feishu_message, github_commit, github_discussion, github_issue
+from collector import feishu_message, feishu_task, github_commit, github_discussion, github_issue
 from generator import formatter
 from generator.hours import HoursRules
 from generator.site import SiteConfig, detail_file_name, render_site
@@ -31,7 +31,9 @@ from shared.models import (
     SOURCE_COMMIT,
     SOURCE_DISCUSSION,
     SOURCE_FEISHU,
+    SOURCE_FEISHU_TASK,
     SOURCE_ISSUE,
+    DataSourceRef,
     ReportStats,
     SourceStatus,
 )
@@ -102,6 +104,7 @@ def _run_pipeline(config: Config, args: argparse.Namespace, logger: JsonLineLogg
     recent = _recent_stats(storage)
 
     members = _effective_members(config, commits, tasks, messages, logger)
+    feishu_tasks = collected.get(SOURCE_FEISHU_TASK, [])
     report = formatter.generate(
         target_date,
         members,
@@ -114,6 +117,9 @@ def _run_pipeline(config: Config, args: argparse.Namespace, logger: JsonLineLogg
         hours_rules=HoursRules.from_config(config.hours),
         recent=recent,
         chat_summaries=collected.get(SOURCE_FEISHU, []),
+        feishu_tasks=feishu_tasks,
+        source_refs=_source_refs(config, statuses) if config.report.attribution_enabled else (),
+        attribution_scope=config.report.attribution_scope,
     )
 
     outputs = _write_outputs(config, report)
@@ -168,6 +174,9 @@ def _collect_all(
     ]
     if config.sources.feishu.enabled:
         plan.append((SOURCE_FEISHU, feishu_message.collect))
+    if config.sources.feishu.tasks.enabled:
+        # v2.4：飞书任务没有时间窗，取的是"此刻状态"快照（签名保持统一）
+        plan.append((SOURCE_FEISHU_TASK, feishu_task.collect))
     results: dict[str, list] = {}
     statuses: list[SourceStatus] = []
     for name, collector in plan:
@@ -191,6 +200,34 @@ def _source_count(name: str, records: list) -> int:
     if name == SOURCE_FEISHU:
         return feishu_message.total_messages(records)
     return len(records)
+
+
+def _source_refs(config: Config, statuses: Sequence[SourceStatus]) -> list[DataSourceRef]:
+    """组装「数据来源」标注（v2.4）：只列本次真正参与采集的数据源。
+
+    标注回答的是"这份数据从哪来"，因此禁用或没进采集计划的源一律不出现；
+    数据源全部不可用时仍按计划列出，这样出错的那一期也看得出数据本应来自哪里。
+    """
+
+    names = {status.name for status in statuses}
+    refs: list[DataSourceRef] = []
+    if names & {SOURCE_COMMIT, SOURCE_ISSUE, SOURCE_DISCUSSION}:
+        refs.append(
+            DataSourceRef(
+                label="GitHub 仓库",
+                full_name="、".join(repo.full_name for repo in config.repos),
+            )
+        )
+    if SOURCE_FEISHU in names:
+        refs.append(
+            DataSourceRef(
+                label="飞书群",
+                full_name="、".join(chat.name for chat in config.sources.feishu.chats),
+            )
+        )
+    if SOURCE_FEISHU_TASK in names:
+        refs.append(DataSourceRef(label="飞书任务"))
+    return refs
 
 
 def _recent_stats(storage: Storage) -> list[ReportStats]:
@@ -348,6 +385,21 @@ def _run_checks(config: Config, logger: JsonLineLogger) -> int:
             problems.append(f"飞书群消息数据源检查失败: {exc}")
     else:
         logger.info("check_feishu", ok=True, detail="未启用飞书群消息数据源，跳过")
+
+    if config.sources.feishu.tasks.enabled:
+        try:
+            tasks = feishu_task.collect(config)
+            logger.info(
+                "check_feishu_tasks",
+                ok=True,
+                count=len(tasks),
+                scope=config.sources.feishu.tasks.scope,
+            )
+        except CollectorError as exc:
+            logger.info("check_feishu_tasks", ok=False, detail=str(exc))
+            problems.append(f"飞书任务数据源检查失败: {exc}")
+    else:
+        logger.info("check_feishu_tasks", ok=True, detail="未启用飞书任务同步，跳过")
 
     if problems:
         for problem in problems:

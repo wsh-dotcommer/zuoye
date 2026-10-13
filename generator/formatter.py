@@ -12,15 +12,22 @@ from typing import Iterable, Sequence
 
 from generator import hours as hours_module
 from generator import template
-from shared.config import MemberConfig
+from shared.config import DEFAULT_ATTRIBUTION_SCOPE, MemberConfig
 from shared.models import (
     SOURCE_COMMIT,
     SOURCE_DISCUSSION,
+    SOURCE_FEISHU_TASK,
     SOURCE_ISSUE,
+    STATUS_DONE,
+    STATUS_IN_PROGRESS,
+    STATUS_NOT_STARTED,
+    TASK_STATUS_ORDER,
     HOURS_EMPTY,
     ChatSummaryRecord,
     CommitRecord,
     DailyReport,
+    DataSourceRef,
+    FeishuTaskRecord,
     MemberReport,
     MessageRecord,
     ReportStats,
@@ -33,10 +40,34 @@ CONTENT_PREVIEW_LIMIT = 140
 COMMIT_FILE_LIMIT = 10
 SHA_LENGTH = 7
 TREND_POINTS = 7
-TREND_MIN_POINTS = 2
+TREND_MIN_POINTS = 3  # v2.4：少于 3 期看不出趋势，且两期合计容易被误读成当日数据
 SPARK_BARS = "▁▂▃▄▅▆▇█"
 EMPTY_NOTE = "今日无记录"
 FAILED_LABEL = "数据获取失败"
+
+# v2.4：数据来源标注
+ATTRIBUTION_SEPARATOR = " ｜ "
+ATTRIBUTION_TIMEZONE_LABELS = {
+    "Asia/Shanghai": "北京时间",
+    "Asia/Tokyo": "日本时间",
+    "Asia/Singapore": "新加坡时间",
+    "UTC": "UTC",
+}
+
+# v2.4：飞书任务快照
+FEISHU_TASK_LIMIT = 20
+FEISHU_TASK_TITLE = "任务进展 · 飞书任务"
+FEISHU_TASK_EMPTY_NOTE = "飞书工作台暂无任务"
+FEISHU_TASK_FAILED_NOTE = "飞书任务数据获取失败"
+FEISHU_TASK_STATUS_MARKS = {
+    STATUS_DONE: "✓",
+    STATUS_IN_PROGRESS: "●",
+    STATUS_NOT_STARTED: "○",
+}
+
+# v2.4：内容板块为空时的合并规则（工时统计与飞书任务各自带口径，不参与合并）
+MERGEABLE_SECTION_KEYS = ("commits", "tasks", "messages")
+MERGE_EMPTY_MIN = 2
 
 # 生成层收到的提交已由采集层按采集窗口裁剪，因此推导时不再二次过滤
 UNBOUNDED_WINDOW = (
@@ -65,12 +96,17 @@ def generate(
     hours_rules: hours_module.HoursRules | None = None,
     recent: Sequence[ReportStats] = (),
     chat_summaries: Sequence[ChatSummaryRecord] = (),
+    feishu_tasks: Sequence[FeishuTaskRecord] = (),
+    source_refs: Sequence[DataSourceRef] = (),
+    attribution_scope: str = "",
 ) -> DailyReport:
     """按成员聚合记录，产出 Markdown 与 HTML 双形态日报。
 
     `recent`（v2.3）为最近几期已保存日报的结构化统计（升序、不含当日），
     用于头部「对比上期」与「近 N 期」两行；`chat_summaries`（v2.3）为飞书群汇总。
-    两者都是仅关键字参数且带默认值，旧调用无需改动。
+    `feishu_tasks`（v2.4）为飞书任务状态快照；`source_refs` 与 `attribution_scope`
+    组成对外产物末尾的「数据来源」标注（不传来源时整行不出现）。
+    新增参数都是仅关键字且带默认值，旧调用无需改动。
     """
 
     member_list = list(members)
@@ -81,6 +117,12 @@ def generate(
 
     member_reports = _aggregate(member_list, commits, tasks, messages, work_hours)
     generated_at = datetime.now().astimezone()
+    task_section = _feishu_task_section(
+        feishu_tasks,
+        statuses=source_statuses,
+        report_date=date,
+        generated_at=generated_at,
+    )
     report = DailyReport(
         date=date,
         team_name=team_name,
@@ -95,28 +137,47 @@ def generate(
         chat_message_count=sum(item.message_count for item in chat_summaries),
         recent_stats=list(recent),
         chat_summaries=list(chat_summaries),
+        feishu_tasks=list(feishu_tasks),
     )
-    view = build_view(report)
+    report.attribution = build_attribution(
+        generated_at=generated_at,
+        source_refs=source_refs,
+        scope=attribution_scope,
+        timezone_name=timezone_name,
+    )
+    view = build_view(report, feishu_task_section=task_section)
     report.markdown = render_markdown(view)
     report.html = template.render_report_html(view)
     return report
 
 
-def build_view(report: DailyReport) -> dict:
+def build_view(report: DailyReport, *, feishu_task_section: dict | None = None) -> dict:
     """把日报转成模板友好的视图模型（Markdown 与 HTML 共用同一份数据）。"""
 
     statuses = {status.name: status for status in report.source_statuses}
     hours_enabled = any(member.work_hours is not None for member in report.members)
     single_member = len(report.members) == 1
+    if feishu_task_section is None:
+        # 直接调用 build_view(report) 的场景（站点层二次渲染、测试）：按已有数据重建
+        feishu_task_section = _feishu_task_section(
+            report.feishu_tasks,
+            statuses=report.source_statuses,
+            report_date=report.date,
+            generated_at=report.generated_at,
+        )
     return {
         "title": f"{report.team_name} 智能日报 · {report.date.isoformat()}",
+        # v2.4：正文大标题不再带日期，日期移到头部信息行，避免手机端折行断日期
+        "heading": f"{report.team_name} 智能日报",
         "date": report.date.isoformat(),
+        "date_label": report.date.isoformat(),
         "team_name": report.team_name,
         "team_label": _team_label(report, single_member),
         "single_member": single_member,
         "generated_at": _format_moment(report.generated_at),
         "hours_summary": _hours_summary(report) if hours_enabled else None,
         "extra_lines": _extra_lines(report),
+        "attribution": report.attribution,
         "source_summary": [
             {
                 "label": status.label,
@@ -130,20 +191,36 @@ def build_view(report: DailyReport) -> dict:
             {
                 "name": member.name,
                 "github_username": member.github_username,
-                "sections": _member_sections(member, statuses),
+                "sections": _member_sections(
+                    member,
+                    statuses,
+                    feishu_task_section=feishu_task_section if index == 0 else None,
+                ),
             }
-            for member in report.members
+            for index, member in enumerate(report.members)
         ],
     }
 
 
-def _member_sections(member: MemberReport, statuses: dict) -> list[dict]:
-    """成员段落固定顺序：代码提交 → 任务进展 → 工时统计 → 协作沟通。"""
+def _member_sections(
+    member: MemberReport,
+    statuses: dict,
+    *,
+    feishu_task_section: dict | None = None,
+) -> list[dict]:
+    """成员段落固定顺序：代码提交 → 任务进展（含飞书任务子小节）→ 工时统计 → 协作沟通。"""
 
     sections = [
-        _section("commits", _commit_items(member.commits), statuses.get(SOURCE_COMMIT)),
+        _section(
+            "commits",
+            _commit_items(member.commits),
+            statuses.get(SOURCE_COMMIT),
+            entries=_commit_entries(member.commits),
+        ),
         _section("tasks", _task_items(member.tasks, member), statuses.get(SOURCE_ISSUE)),
     ]
+    if feishu_task_section is not None:
+        sections.append(feishu_task_section)
     hours_section = _hours_section(member)
     if hours_section is not None:
         sections.append(hours_section)
@@ -154,7 +231,44 @@ def _member_sections(member: MemberReport, statuses: dict) -> list[dict]:
             statuses.get(SOURCE_DISCUSSION),
         )
     )
-    return sections
+    return _merge_empty_sections(sections)
+
+
+def _merge_empty_sections(sections: list[dict]) -> list[dict]:
+    """v2.4：同一次日报里空板块 ≥ 2 个时合并成一行，避免半屏都是"今日无记录"。
+
+    只合并内容板块（代码提交 / 任务进展 / 协作沟通）；工时统计与飞书任务
+    各自带口径说明，仍按原样呈现。合并后的板块留在第一个空板块的位置，
+    其余空板块移除，有内容的板块顺序不变。
+    """
+
+    empty_titles = [
+        section["title"]
+        for section in sections
+        if section["state"] == "empty" and section["key"] in MERGEABLE_SECTION_KEYS
+    ]
+    if len(empty_titles) < MERGE_EMPTY_MIN:
+        return sections
+
+    merged = {
+        "key": "empty_summary",
+        "title": "今日无记录",
+        "state": "empty",
+        "lines": [],
+        "entries": [],
+        "note": "今日无记录：" + "、".join(empty_titles),
+        "merged": True,
+    }
+    out: list[dict] = []
+    inserted = False
+    for section in sections:
+        if section["state"] == "empty" and section["key"] in MERGEABLE_SECTION_KEYS:
+            if not inserted:
+                out.append(merged)
+                inserted = True
+            continue
+        out.append(section)
+    return out
 
 
 def _team_label(report: DailyReport, single_member: bool) -> str:
@@ -259,8 +373,9 @@ def render_markdown(view: dict) -> str:
     """渲染 Markdown 版本日报。"""
 
     lines = [
-        f"# {view['title']}",
+        f"# {view['heading']}",
         "",
+        f"- 日期：{view['date_label']}",
         f"- 团队：{view.get('team_label') or view['team_name']}",
         f"- 生成时间：{view['generated_at']}",
         "- 数据源：" + " · ".join(_source_summary_line(item) for item in view["source_summary"]),
@@ -274,7 +389,7 @@ def render_markdown(view: dict) -> str:
     lines.append("")
     if not view["members"]:
         lines.append("（没有可输出的成员段落）")
-        return "\n".join(lines).rstrip() + "\n"
+        return _finish_markdown(lines, view)
 
     for member in view["members"]:
         if not view.get("single_member"):
@@ -288,6 +403,15 @@ def render_markdown(view: dict) -> str:
             else:
                 lines.append(f"- {section['note']}")
             lines.append("")
+    return _finish_markdown(lines, view)
+
+
+def _finish_markdown(lines: list[str], view: dict) -> str:
+    """收尾：追加「数据来源」标注（v2.4）；未启用时产物与旧版逐字节一致。"""
+
+    attribution = (view.get("attribution") or "").strip()
+    if attribution:
+        lines.extend(["", attribution])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -354,14 +478,84 @@ def _aggregate(
     return reports
 
 
-def _section(key: str, items: list[str], status: SourceStatus | None) -> dict:
+def _section(
+    key: str,
+    items: list[str],
+    status: SourceStatus | None,
+    *,
+    entries: list[dict] | None = None,
+) -> dict:
+    """构造一个板块视图；`lines` 给 Markdown/飞书，`entries` 给 HTML 的两行布局。"""
+
     title = SECTION_TITLES[key]
+    base = {"key": key, "title": title, "entries": entries or []}
     if status is not None and not status.ok:
         reason = status.error or "未知原因"
-        return {"title": title, "state": "failed", "lines": [], "note": f"{FAILED_LABEL}（{reason}）"}
+        return {**base, "state": "failed", "lines": [], "note": f"{FAILED_LABEL}（{reason}）"}
     if not items:
-        return {"title": title, "state": "empty", "lines": [], "note": EMPTY_NOTE}
-    return {"title": title, "state": "ok", "lines": items, "note": ""}
+        return {**base, "state": "empty", "lines": [], "note": EMPTY_NOTE}
+    return {**base, "state": "ok", "lines": items, "note": ""}
+
+
+def _feishu_task_section(
+    tasks: Sequence[FeishuTaskRecord],
+    *,
+    statuses: Sequence[SourceStatus],
+    report_date: date,
+    generated_at: datetime,
+) -> dict | None:
+    """飞书任务状态快照小节（v2.4），附在「任务进展」板块之后。
+
+    返回 None 表示本次运行根本没有这个数据源（未启用），此时连小节标题都不出现，
+    行为与 v2.3 完全一致。飞书任务没有"时间窗"概念，所以标题里显式标注快照时间，
+    补跑历史日期时再额外标注「补跑快照」，避免被误读成当天发生的流转。
+    """
+
+    status = next((item for item in statuses if item.name == SOURCE_FEISHU_TASK), None)
+    if status is None:
+        return None
+
+    title = FEISHU_TASK_TITLE
+    if report_date != generated_at.date():
+        title += "（补跑快照）"
+    base = {"key": SOURCE_FEISHU_TASK, "title": title, "sub": True, "entries": []}
+
+    if not status.ok:
+        reason = status.error or "未知原因"
+        return {**base, "state": "failed", "lines": [], "note": f"{FEISHU_TASK_FAILED_NOTE}（{reason}）"}
+    if not tasks:
+        return {**base, "state": "empty", "lines": [], "note": FEISHU_TASK_EMPTY_NOTE}
+
+    counts: dict[str, int] = {name: 0 for name in TASK_STATUS_ORDER}
+    for task in tasks:
+        counts[task.status] = counts.get(task.status, 0) + 1
+    breakdown = " · ".join(
+        f"{name} {counts[name]}" for name in TASK_STATUS_ORDER if counts.get(name)
+    )
+    lines = [f"- 截至 {_format_moment(generated_at)} · 共 {len(tasks)} 条：{breakdown}"]
+    ordered = sorted(tasks, key=_feishu_task_sort_key)[:FEISHU_TASK_LIMIT]
+    lines.extend(
+        f"- {FEISHU_TASK_STATUS_MARKS.get(task.status, '·')} {task.status} · "
+        f"{task.summary}{_feishu_task_due(task)}"
+        for task in ordered
+    )
+    if len(tasks) > FEISHU_TASK_LIMIT:
+        lines.append(f"- …（其余 {len(tasks) - FEISHU_TASK_LIMIT} 条见飞书任务）")
+    return {**base, "state": "ok", "lines": lines, "note": ""}
+
+
+def _feishu_task_sort_key(task: FeishuTaskRecord) -> tuple:
+    """进行中 → 未开始 → 已完成；同组内按截止日期升序（无截止的排最后）。"""
+
+    try:
+        rank = TASK_STATUS_ORDER.index(task.status)
+    except ValueError:
+        rank = len(TASK_STATUS_ORDER)
+    return (rank, task.due or date.max, task.summary)
+
+
+def _feishu_task_due(task: FeishuTaskRecord) -> str:
+    return f"（截止 {task.due.isoformat()}）" if task.due else ""
 
 
 def _hours_section(member: MemberReport) -> dict | None:
@@ -373,17 +567,28 @@ def _hours_section(member: MemberReport) -> dict | None:
     title = SECTION_TITLES["hours"]
     if not record.available:
         return {
+            "key": "hours",
             "title": title,
             "state": "failed",
             "lines": [],
+            "entries": [],
             "note": f"工时数据不可用（{record.detail or '未知原因'}）",
         }
     if record.state == HOURS_EMPTY:
-        return {"title": title, "state": "empty", "lines": [], "note": f"0h（{EMPTY_NOTE}）"}
+        return {
+            "key": "hours",
+            "title": title,
+            "state": "empty",
+            "lines": [],
+            "entries": [],
+            "note": f"0h（{EMPTY_NOTE}）",
+        }
     return {
+        "key": "hours",
         "title": title,
         "state": "ok",
         "lines": [f"- 工时：{_format_hours(record.hours)}h（{record.commit_count} 条提交，{record.session_count} 个工作段）"],
+        "entries": [],
         "note": "",
     }
 
@@ -427,6 +632,29 @@ def _commit_items(commits: Sequence[CommitRecord]) -> list[str]:
     ]
 
 
+def _commit_entries(commits: Sequence[CommitRecord]) -> list[dict]:
+    """提交行的 HTML 两行布局（v2.4）。
+
+    主行放"仓库 + 提交信息"，元信息行放短号链接 + 变更统计；这样手机端不会
+    把一条提交折成三行。Markdown/飞书仍用单行（`lines`），形态不变。
+    """
+
+    entries: list[dict] = []
+    for record in commits:
+        short = (record.sha or "").strip()[:SHA_LENGTH]
+        meta: list[str] = []
+        if short:
+            meta.append(f"[{short}]({record.url})" if record.url else short)
+        meta.append(_commit_stats_text(record))
+        entries.append(
+            {
+                "main": f"{record.repo} {record.message or '(无提交信息)'}".strip(),
+                "meta": " · ".join(meta),
+            }
+        )
+    return entries
+
+
 def _commit_link(record: CommitRecord) -> str:
     """提交短号 + 链接；SHA 缺失时整段省略，不留空壳。"""
 
@@ -444,13 +672,17 @@ def _commit_stats(record: CommitRecord) -> str:
     文件名缺失（未取详情统计、详情请求失败）时退回只报数量的旧格式，不出现空冒号。
     """
 
-    summary = f"（+{record.additions}/-{record.deletions}，{record.files_changed} 个文件"
+    return f"（{_commit_stats_text(record)}）"
+
+
+def _commit_stats_text(record: CommitRecord) -> str:
+    summary = f"+{record.additions}/-{record.deletions}，{record.files_changed} 个文件"
     if record.files:
         shown = "、".join(record.files[:COMMIT_FILE_LIMIT])
         if len(record.files) > COMMIT_FILE_LIMIT:
             shown += "、…"
         summary += f"：{shown}"
-    return summary + "）"
+    return summary
 
 
 def _task_items(tasks: Sequence[TaskRecord], member: MemberReport) -> list[str]:
@@ -508,6 +740,32 @@ def _preview(content: str) -> str:
 
 def _format_moment(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%d %H:%M")
+
+
+def build_attribution(
+    *,
+    generated_at: datetime,
+    source_refs: Sequence[DataSourceRef],
+    scope: str,
+    timezone_name: str = "",
+) -> str:
+    """组装对外产物末尾的「数据来源」标注（v2.4）。
+
+    三要素固定顺序：数据源全称 → 采集时间 → 授权使用范围。没有任何数据源时
+    返回空串，调用方据此决定不渲染——这样旧调用与旧测试的产物保持字节不变。
+    """
+
+    refs = [ref for ref in source_refs if ref.label or ref.full_name]
+    if not refs:
+        return ""
+    zone = ATTRIBUTION_TIMEZONE_LABELS.get(timezone_name, timezone_name or "本地时间")
+    return ATTRIBUTION_SEPARATOR.join(
+        (
+            "数据来源：" + "、".join(ref.render() for ref in refs),
+            f"采集时间：{_format_moment(generated_at)}（{zone}）",
+            f"授权范围：{scope.strip() or DEFAULT_ATTRIBUTION_SCOPE}",
+        )
+    )
 
 
 def _source_summary_line(item: dict) -> str:

@@ -19,6 +19,9 @@ from shared.errors import ConfigError
 
 _PLACEHOLDER = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
+# 「数据来源」标注里的授权使用范围默认值（v2.4）
+DEFAULT_ATTRIBUTION_SCOPE = "仅限团队内部日报展示"
+
 
 @dataclass(frozen=True)
 class TeamConfig:
@@ -71,8 +74,51 @@ class GithubSourceConfig:
 
 
 @dataclass(frozen=True)
+class FeishuChatConfig:
+    """要采集的飞书群（v2.3）：id 为 chat_id，name 仅用于日报展示。"""
+
+    chat_id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class FeishuTaskConfig:
+    """飞书任务状态同步（v2.4，只读）。
+
+    `scope` 为 `all` 时拉取应用可见的全部任务；为 `tasklist` 时只拉
+    `tasklist_guids` 里的清单（工作台任务不在默认可见范围内时用这个）。
+    """
+
+    enabled: bool = False
+    scope: str = "all"
+    tasklist_guids: tuple[str, ...] = ()
+    max_tasks: int = 200
+
+
+@dataclass(frozen=True)
+class FeishuSourceConfig:
+    """飞书群消息数据源（v2.3）：只读汇总，默认关闭。"""
+
+    enabled: bool = False
+    app_id: str = ""
+    app_secret: str = ""
+    base_url: str = "https://open.feishu.cn"
+    chats: tuple[FeishuChatConfig, ...] = ()
+    retry_times: int = 3
+    timeout_seconds: float = 15.0
+    tasks: FeishuTaskConfig = FeishuTaskConfig()
+
+    @property
+    def any_enabled(self) -> bool:
+        """群消息或任务同步任一启用，都需要 app 凭据。"""
+
+        return self.enabled or self.tasks.enabled
+
+
+@dataclass(frozen=True)
 class SourcesConfig:
     github: GithubSourceConfig
+    feishu: FeishuSourceConfig = FeishuSourceConfig()
 
 
 @dataclass(frozen=True)
@@ -85,6 +131,8 @@ class ReportConfig:
     skip_weekends: bool = True
     holidays: tuple[date, ...] = ()
     workbench: bool = True
+    attribution_enabled: bool = True
+    attribution_scope: str = DEFAULT_ATTRIBUTION_SCOPE
 
 
 @dataclass(frozen=True)
@@ -206,6 +254,27 @@ def load_config(
         timeout_seconds=float(github_raw.get("timeout_seconds", 15)),
     )
 
+    original_sources = raw.get("sources") or {}
+    feishu_raw = sources_raw.get("feishu") or {}
+    if not isinstance(feishu_raw, dict):
+        raise ConfigError("配置项 sources.feishu 必须是映射结构")
+    feishu = FeishuSourceConfig(
+        enabled=bool(feishu_raw.get("enabled", False)),
+        app_id=str(feishu_raw.get("app_id", "")).strip(),
+        app_secret=str(feishu_raw.get("app_secret", "")).strip(),
+        base_url=str(feishu_raw.get("base_url", "https://open.feishu.cn")).strip().rstrip("/")
+        or "https://open.feishu.cn",
+        chats=_parse_feishu_chats(feishu_raw.get("chats")),
+        retry_times=int(feishu_raw.get("retry_times", 3)),
+        timeout_seconds=float(feishu_raw.get("timeout_seconds", 15)),
+        tasks=_parse_feishu_tasks(feishu_raw.get("tasks")),
+    )
+    if feishu.enabled and not feishu.chats:
+        raise ConfigError("sources.feishu.enabled 为真时必须配置 chats（至少一个群）")
+
+    attribution_raw = report_raw.get("attribution") or {}
+    if not isinstance(attribution_raw, dict):
+        raise ConfigError("配置项 report.attribution 必须是映射结构")
     report = ReportConfig(
         output_dir=Path(str(report_raw.get("output_dir", "output"))),
         site_dir=Path(str(report_raw.get("site_dir", "docs"))),
@@ -215,6 +284,9 @@ def load_config(
         skip_weekends=bool(report_raw.get("skip_weekends", True)),
         holidays=_parse_holidays(report_raw.get("holidays")),
         workbench=bool(report_raw.get("workbench", True)),
+        attribution_enabled=bool(attribution_raw.get("enabled", True)),
+        attribution_scope=str(attribution_raw.get("scope", DEFAULT_ATTRIBUTION_SCOPE)).strip()
+        or DEFAULT_ATTRIBUTION_SCOPE,
     )
 
     hours = _parse_hours(resolved.get("hours"))
@@ -228,12 +300,14 @@ def load_config(
         required_missing.extend(_placeholders(original_notify.get("email") or {}))
     if notify.lark_bot.enabled and not notify.lark_bot.webhook:
         required_missing.extend(_placeholders(original_notify.get("lark_bot") or {}))
+    if feishu.any_enabled and (not feishu.app_id or not feishu.app_secret):
+        required_missing.extend(_placeholders(original_sources.get("feishu") or {}))
 
     return Config(
         team=team,
         repos=repos,
         members=members,
-        sources=SourcesConfig(github=github),
+        sources=SourcesConfig(github=github, feishu=feishu),
         hours=hours,
         report=report,
         notify=notify,
@@ -366,6 +440,56 @@ def _parse_repos(raw: Mapping[str, Any]) -> tuple[RepoConfig, ...]:
             raise ConfigError(f"repos[{index}] 缺少 owner 或 name")
         repos.append(RepoConfig(owner=owner, name=name))
     return tuple(repos)
+
+
+def _parse_feishu_chats(value: Any) -> tuple[FeishuChatConfig, ...]:
+    """解析 sources.feishu.chats（v2.3）：每项形如 `{id: oc_xxx, name: 智能日报}`。"""
+
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ConfigError(f"配置项 sources.feishu.chats 类型错误，期望列表: {value!r}")
+    chats: list[FeishuChatConfig] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ConfigError("sources.feishu.chats 的每一项必须是映射结构（id / name）")
+        chat_id = str(item.get("id", "")).strip()
+        if not chat_id:
+            raise ConfigError("sources.feishu.chats 的每一项都必须有 id（chat_id）")
+        chats.append(
+            FeishuChatConfig(chat_id=chat_id, name=str(item.get("name", "")).strip() or chat_id)
+        )
+    return tuple(chats)
+
+
+def _parse_feishu_tasks(value: Any) -> FeishuTaskConfig:
+    """解析 sources.feishu.tasks（v2.4）：任务状态同步开关与同步范围。"""
+
+    if value is None:
+        return FeishuTaskConfig()
+    if not isinstance(value, dict):
+        raise ConfigError("配置项 sources.feishu.tasks 必须是映射结构")
+
+    raw_scope = str(value.get("scope", "all")).strip().lower() or "all"
+    tasklist_guids = _as_str_tuple(value.get("tasklist_guids"))
+    if raw_scope not in ("all", "tasklist"):
+        raise ConfigError(
+            f"sources.feishu.tasks.scope 只支持 all / tasklist，实际为: {raw_scope!r}"
+        )
+
+    config = FeishuTaskConfig(
+        enabled=bool(value.get("enabled", False)),
+        scope=raw_scope,
+        tasklist_guids=tasklist_guids,
+        max_tasks=int(value.get("max_tasks", 200)),
+    )
+    if config.max_tasks <= 0:
+        raise ConfigError("sources.feishu.tasks.max_tasks 必须大于 0")
+    if config.enabled and config.scope == "tasklist" and not config.tasklist_guids:
+        raise ConfigError(
+            "sources.feishu.tasks.scope 为 tasklist 时必须配置 tasklist_guids（至少一个清单）"
+        )
+    return config
 
 
 def _parse_members(raw: Mapping[str, Any]) -> tuple[MemberConfig, ...]:

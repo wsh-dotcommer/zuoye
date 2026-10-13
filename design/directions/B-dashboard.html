@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方向 B · 数据看板风</title>
+<style>
+  :root{
+    --bg:#eef1f6; --card:#ffffff; --ink:#141c26; --muted:#64748b;
+    --line:#dde4ee; --accent:#2f5fd0; --accent-soft:#eaf0fd;
+    --teal:#12a594; --teal-soft:#e6f6f3; --warn:#d97706; --warn-soft:#fdf3e3;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 16px 64px;background:var(--bg);color:var(--ink);
+    font-family:"Microsoft YaHei","PingFang SC","Helvetica Neue",Arial,sans-serif;
+    line-height:1.7;font-size:14px}
+  .board{max-width:1000px;margin:0 auto}
+  .screen-label{font-size:12px;letter-spacing:.16em;color:#8b97a8;margin:0 0 10px}
+
+  .app{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:22px 24px 26px;margin-bottom:28px;box-shadow:0 1px 2px rgba(20,28,38,.04)}
+  .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .team-chip{font-size:12px;color:var(--accent);background:var(--accent-soft);
+    border-radius:999px;padding:3px 10px}
+  .topbar h1{margin:0;font-size:24px;letter-spacing:-.01em}
+  .topbar .spacer{margin-left:auto}
+  .nav-btn{font-size:12.5px;color:var(--muted);border:1px solid var(--line);
+    background:#fff;border-radius:999px;padding:5px 12px;text-decoration:none}
+  .nav-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .sub{margin:6px 0 0;color:var(--muted);font-size:12.5px}
+
+  /* KPI */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px}
+  .kpi{background:linear-gradient(180deg,#fbfcfe,#f5f8fd);border:1px solid var(--line);
+    border-radius:12px;padding:14px 16px}
+  .kpi .label{font-size:12px;color:var(--muted)}
+  .kpi .value{font-size:28px;font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums}
+  .kpi .value small{font-size:13px;font-weight:400;color:var(--muted);margin-left:2px}
+  .kpi .spark{display:flex;gap:3px;align-items:flex-end;height:26px;margin-top:8px}
+  .kpi .spark i{flex:1;background:var(--accent);opacity:.28;border-radius:2px 2px 0 0;display:block}
+  .kpi.teal .spark i{background:var(--teal)}
+  .kpi.warn .spark i{background:var(--warn)}
+
+  /* 成员卡 */
+  .member{display:flex;gap:16px;align-items:center;margin-top:22px;padding-top:20px;
+    border-top:1px solid var(--line)}
+  .avatar{width:44px;height:44px;border-radius:12px;background:var(--accent);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600}
+  .member .who{font-size:17px;font-weight:600}
+  .member .handle{color:var(--muted);font-size:12.5px}
+  .ring{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .ring .dial{width:64px;height:64px;border-radius:50%;
+    background:conic-gradient(var(--teal) 0deg 60deg,#e6ebf3 60deg 360deg);
+    display:flex;align-items:center;justify-content:center}
+  .ring .dial span{width:48px;height:48px;border-radius:50%;background:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;
+    font-variant-numeric:tabular-nums}
+  .ring .cap{font-size:12px;color:var(--muted);line-height:1.5}
+
+  /* 面板 */
+  .panels{display:grid;grid-template-columns:1.35fr 1fr;gap:14px;margin-top:20px}
+  .panel{border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:#fff}
+  .panel h2{margin:0 0 12px;font-size:14px;display:flex;align-items:center;gap:8px}
+  .panel h2 .tag{font-size:11px;font-weight:400;color:var(--muted);border:1px solid var(--line);
+    border-radius:999px;padding:1px 8px;margin-left:auto}
+  .panel h2::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .panel.teal h2::before{background:var(--teal)}
+  .panel.warn h2::before{background:var(--warn)}
+
+  /* 时间轴 */
+  .timeline{list-style:none;margin:0;padding:0 0 0 14px;border-left:2px solid var(--line)}
+  .timeline li{position:relative;padding:0 0 14px 16px;font-size:13px}
+  .timeline li:last-child{padding-bottom:0}
+  .timeline li::before{content:"";position:absolute;left:-7px;top:7px;width:10px;height:10px;
+    border-radius:50%;background:#fff;border:2px solid var(--accent)}
+  .timeline .repo{font-family:Consolas,"Courier New",monospace;font-size:11px;color:var(--muted)}
+  .timeline .row{display:flex;gap:10px;justify-content:space-between;align-items:baseline}
+  .delta{font-family:Consolas,"Courier New",monospace;font-size:12px;white-space:nowrap;
+    font-variant-numeric:tabular-nums}
+  .delta .a{color:var(--teal)} .delta .d{color:#c2410c}
+
+  /* 任务条 */
+  .task{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:13px}
+  .task:last-child{border-bottom:0}
+  .task .name{font-weight:600}
+  .state{font-size:11.5px;border-radius:999px;padding:2px 9px;background:var(--warn-soft);color:var(--warn)}
+  .state.done{background:var(--teal-soft);color:#0f766e}
+  .state.arrow{color:var(--muted);background:transparent;padding:0}
+
+  /* 工时明细 */
+  .hour-bars{display:grid;gap:10px;margin-top:4px}
+  .hour-row{display:grid;grid-template-columns:56px 1fr 52px;align-items:center;gap:10px;font-size:12.5px}
+  .hour-row .bar{height:10px;border-radius:999px;background:#e9eef6;overflow:hidden}
+  .hour-row .bar i{display:block;height:100%;border-radius:999px;background:var(--teal)}
+  .hour-row .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+  .hour-note{font-size:12px;color:var(--muted);margin-top:10px}
+
+  /* 沟通 */
+  .msg{padding:10px 12px;border-radius:10px;background:#f7f9fc;margin-bottom:8px;font-size:13px}
+  .msg:last-child{margin-bottom:0}
+  .msg .who{font-size:11.5px;color:var(--muted);margin-bottom:2px}
+
+  .foot{margin-top:20px;padding-top:14px;border-top:1px solid var(--line);
+    display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+
+  /* 索引页：月历 */
+  .cal-head{display:flex;align-items:center;gap:12px;margin:18px 0 10px}
+  .cal-head h2{margin:0;font-size:16px}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .cal-grid .wd{font-size:11px;color:var(--muted);text-align:center;padding:4px 0}
+  .cal-grid .d{aspect-ratio:1/1;border:1px solid var(--line);border-radius:10px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    font-size:13px;color:#94a3b8;background:#fbfcfe}
+  .cal-grid .d.on{background:var(--accent-soft);border-color:#c7d7f8;color:var(--accent);font-weight:600}
+  .cal-grid .d.on .dot{width:5px;height:5px;border-radius:50%;background:var(--accent)}
+  .cal-grid .d .dot{width:5px;height:5px;border-radius:50%;background:transparent}
+  .legend{font-size:12px;color:var(--muted);margin-top:12px}
+
+  @media (max-width:860px){
+    .kpis{grid-template-columns:repeat(2,1fr)}
+    .panels{grid-template-columns:1fr}
+  }
+  @media (max-width:520px){
+    body{padding:18px 10px 44px}
+    .app{padding:18px 16px 20px}
+    .topbar h1{font-size:20px}
+    .member{flex-wrap:wrap}
+    .ring{margin-left:0;width:100%;justify-content:space-between}
+  }
+</style>
+</head>
+<body>
+<div class="board">
+
+  <p class="screen-label">屏幕 1 / 日报详情页</p>
+  <article class="app">
+    <div class="topbar">
+      <span class="team-chip">红豆的研发团队</span>
+      <h1>2026-09-26</h1>
+      <div class="spacer"></div>
+      <a class="nav-btn" href="#">← 上一期</a>
+      <a class="nav-btn" href="#">日报索引</a>
+    </div>
+    <p class="sub">生成于 18:40 · 数据源全部正常 · 1 名成员有活动</p>
+
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">代码提交</div>
+        <div class="value">10 <small>条</small></div>
+        <div class="spark"><i style="height:40%"></i><i style="height:65%"></i><i style="height:30%"></i><i style="height:80%"></i><i style="height:55%"></i><i style="height:100%"></i><i style="height:45%"></i></div>
+      </div>
+      <div class="kpi teal">
+        <div class="label">任务进展</div>
+        <div class="value">2 <small>条</small></div>
+        <div class="spark"><i style="height:60%"></i><i style="height:100%"></i><i style="height:35%"></i><i style="height:70%"></i><i style="height:50%"></i><i style="height:40%"></i><i style="height:65%"></i></div>
+      </div>
+      <div class="kpi">
+        <div class="label">协作沟通</div>
+        <div class="value">2 <small>条</small></div>
+        <div class="spark"><i style="height:50%"></i><i style="height:35%"></i><i style="height:90%"></i><i style="height:45%"></i><i style="height:60%"></i><i style="height:30%"></i><i style="height:75%"></i></div>
+      </div>
+      <div class="kpi warn">
+        <div class="label">团队工时</div>
+        <div class="value">2 <small>小时</small></div>
+        <div class="spark"><i style="height:30%"></i><i style="height:45%"></i><i style="height:100%"></i><i style="height:55%"></i><i style="height:40%"></i><i style="height:70%"></i><i style="height:35%"></i></div>
+      </div>
+    </div>
+
+    <div class="member">
+      <div class="avatar">红</div>
+      <div>
+        <div class="who">红豆</div>
+        <div class="handle">wsh-dotcommer · 10 条提交 · 2 个工作段</div>
+      </div>
+      <div class="ring">
+        <div class="dial"><span>2h</span></div>
+        <div class="cap">人均工时<br>推导自提交时间</div>
+      </div>
+    </div>
+
+    <div class="panels">
+      <section class="panel">
+        <h2>代码提交<span class="tag">10 条</span></h2>
+        <ul class="timeline">
+          <li>
+            <div class="row"><span>feat: SDD 复现智能日报生成器 v1.1（含工时统计与静态日报站）</span><span class="delta"><span class="a">+6220</span>/<span class="d">-0</span></span></div>
+            <span class="repo">wsh-dotcommer/zuoye · 53 个文件</span>
+          </li>
+          <li>
+            <div class="row"><span>chore: 同步本地改动</span><span class="delta"><span class="a">+83</span>/<span class="d">-2</span></span></div>
+            <span class="repo">wsh-dotcommer/zuoye · 2 个文件</span>
+          </li>
+          <li>
+            <div class="row"><span>Add files via upload</span><span class="delta"><span class="a">+281</span>/<span class="d">-276</span></span></div>
+            <span class="repo">wsh-dotcommer/zuoye · 2 个文件</span>
+          </li>
+          <li>
+            <div class="row"><span>Add files via upload</span><span class="delta"><span class="a">+172</span>/<span class="d">-14</span></span></div>
+            <span class="repo">wsh-dotcommer/zuoye · 7 个文件</span>
+          </li>
+          <li>
+            <div class="row"><span>Add files via upload</span><span class="delta"><span class="a">+185</span>/<span class="d">-0</span></span></div>
+            <span class="repo">wsh-dotcommer/zuoye · 2 个文件</span>
+          </li>
+          <li>
+            <div class="row"><span>另有 5 条提交</span><span class="delta"><span class="a">+288</span>/<span class="d">-52</span></span></div>
+            <span class="repo">wsh-dotcommer/zuoye</span>
+          </li>
+        </ul>
+      </section>
+
+      <div>
+        <section class="panel warn">
+          <h2>任务进展<span class="tag">2 条</span></h2>
+          <div class="task">
+            <span class="name">test</span>
+            <span class="state">新建</span><span class="state arrow">→</span><span class="state">进行中</span>
+          </div>
+          <div class="task">
+            <span class="name">text2</span>
+            <span class="state">新建</span><span class="state arrow">→</span><span class="state">进行中</span>
+          </div>
+        </section>
+
+        <section class="panel teal" style="margin-top:14px">
+          <h2>工时统计<span class="tag">2h</span></h2>
+          <div class="hour-bars">
+            <div class="hour-row">
+              <span>红豆</span>
+              <span class="bar"><i style="width:100%"></i></span>
+              <span class="num">2h</span>
+            </div>
+          </div>
+          <p class="hour-note">10 条提交归为 2 个工作段 · 收尾 +0.5h/段 · 按 0.5h 取整 · 单日上限 12h</p>
+        </section>
+
+        <section class="panel" style="margin-top:14px">
+          <h2>协作沟通<span class="tag">2 条</span></h2>
+          <div class="msg">
+            <div class="who">wsh-dotcommer/zuoye #1 · wsh-dotcommer</div>
+            测试一下懂得都懂
+          </div>
+          <div class="msg">
+            <div class="who">wsh-dotcommer/zuoye #2 · wsh-dotcommer</div>
+            hhhhh
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span>由智能日报生成器生成 · 工时按提交时间推导，非真实考勤</span>
+      <span>2026-09-26 18:40</span>
+    </div>
+  </article>
+
+  <p class="screen-label">屏幕 2 / 索引页</p>
+  <article class="app">
+    <div class="topbar">
+      <span class="team-chip">红豆的研发团队</span>
+      <h1>日报索引</h1>
+      <div class="spacer"></div>
+      <a class="nav-btn" href="#">本月</a>
+    </div>
+    <div class="cal-head"><h2>2026 年 9 月</h2><span class="sub" style="margin:0">有日报的日期高亮，点日期查看</span></div>
+    <div class="cal-grid">
+      <span class="wd">一</span><span class="wd">二</span><span class="wd">三</span><span class="wd">四</span><span class="wd">五</span><span class="wd">六</span><span class="wd">日</span>
+      <span class="d">21</span><span class="d">22</span><span class="d">23</span><span class="d">24</span>
+      <span class="d on">25<span class="dot"></span></span>
+      <span class="d on">26<span class="dot"></span></span><span class="d">27</span>
+      <span class="d">28</span><span class="d">29</span><span class="d">30</span><span class="d">31</span>
+      <span class="d">1</span><span class="d">2</span><span class="d">3</span>
+    </div>
+    <p class="legend">9 月 25 日 · 提交 3 · 任务 2 · 工时 1.5h　｜　9 月 26 日 · 提交 10 · 任务 2 · 工时 2h</p>
+    <div class="foot">
+      <span>共 2 期日报</span>
+      <span>2026-09-26 18:40</span>
+    </div>
+  </article>
+
+</div>
+</body>
+</html>

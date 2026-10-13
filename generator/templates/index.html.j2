@@ -1,21 +1,166 @@
 {% extends "base.html.j2" %}
 {% block content %}
-    <header class="header">
-      <h1>{{ site_title }}</h1>
-      <p class="meta">{{ team_name }} · 共 {{ entries|length }} 期日报</p>
-    </header>
-{% if entries %}
-    <ul class="entries">
-{% for entry in entries %}
-      <li>
-        <a class="entry" href="{{ entry.site_file }}">
-          <span class="date">{{ entry.date }}</span>
-          <span class="info">{{ entry.member_count }} 名成员 · 生成于 {{ entry.generated_at }}</span>
-        </a>
-      </li>
+    <section class="page-intro">
+      <p class="eyebrow">Daily report archive</p>
+      <h1>每一期的日报，都在这里。</h1>
+      <p class="intro-copy">{{ team_name }} · 共 {{ entries|length }} 期日报 · 点击任意一期查看当天详情</p>
+    </section>
+{% if trend %}
+    <section class="panel" aria-labelledby="trend-title">
+      <div class="panel-heading">
+        <div>
+          <p class="panel-kicker">Trend · 近 {{ trend.count }} 期</p>
+          <h2 id="trend-title">趋势</h2>
+        </div>
+        <span class="note-chip"><span class="local-dot" aria-hidden="true"></span>来自已生成的日报</span>
+      </div>
+      <div class="trend-grid">
+        <figure class="trend-chart">
+          <figcaption>代码提交（条）</figcaption>
+          <svg viewBox="0 0 {{ trend.commits.width }} {{ trend.commits.height }}" role="img" aria-label="近 {{ trend.count }} 期代码提交趋势" preserveAspectRatio="xMidYMid meet">
+{% for bar in trend.commits.bars %}
+            <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}"></rect>
+            <text x="{{ bar.label_x }}" y="{{ bar.value_y }}" text-anchor="middle">{{ bar.value }}</text>
+            <text x="{{ bar.label_x }}" y="{{ bar.label_y }}" text-anchor="middle">{{ bar.label }}</text>
 {% endfor %}
-    </ul>
+          </svg>
+        </figure>
+        <figure class="trend-chart">
+          <figcaption>工时（小时）</figcaption>
+          <svg viewBox="0 0 {{ trend.hours.width }} {{ trend.hours.height }}" role="img" aria-label="近 {{ trend.count }} 期工时趋势" preserveAspectRatio="xMidYMid meet">
+{% for bar in trend.hours.bars %}
+            <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}"></rect>
+            <text x="{{ bar.label_x }}" y="{{ bar.value_y }}" text-anchor="middle">{{ bar.value }}</text>
+            <text x="{{ bar.label_x }}" y="{{ bar.label_y }}" text-anchor="middle">{{ bar.label }}</text>
+{% endfor %}
+          </svg>
+        </figure>
+      </div>
+    </section>
+{% endif %}
+{% if interactive %}
+    <div id="workbench" hidden>
+      <section class="workspace" aria-label="日报工作台">
+        <section class="panel" aria-labelledby="workbench-form-title">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Step 01 · 填写内容</p>
+              <h2 id="workbench-form-title">今天做了什么？</h2>
+            </div>
+            <span class="step-number" aria-hidden="true">01</span>
+          </div>
+          <div class="field">
+            <label class="field-label" for="workbench-date">日报日期 <span class="required-mark" aria-hidden="true">*</span></label>
+            <input class="text-input" id="workbench-date" name="workbench-date" type="date">
+            <p class="field-error visually-hidden" id="workbench-date-error" aria-live="polite"></p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="workbench-today">今日完成 <span class="required-mark" aria-hidden="true">*</span></label>
+            <textarea class="text-area" id="workbench-today" name="workbench-today" aria-describedby="workbench-today-help workbench-today-error" placeholder="写下完成的事项，每项另起一行"></textarea>
+            <p class="field-help" id="workbench-today-help">按事项分行填写；生成后仍可继续编辑。</p>
+            <p class="field-error visually-hidden" id="workbench-today-error" aria-live="polite"></p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="workbench-tomorrow">明日计划</label>
+            <textarea class="text-area short" id="workbench-tomorrow" name="workbench-tomorrow" placeholder="例如：继续跟进需求，补充验收记录"></textarea>
+          </div>
+          <div class="field">
+            <label class="field-label" for="workbench-blockers">需要协助</label>
+            <textarea class="text-area short" id="workbench-blockers" name="workbench-blockers" aria-describedby="workbench-blockers-help" placeholder="没有待协调事项可留空"></textarea>
+            <p class="field-help" id="workbench-blockers-help">留空时日报会写「未填写」，不会替你猜测。</p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="workbench-load">从自动日报载入</label>
+            <select class="select-input" id="workbench-load" name="workbench-load">
+              <option value="">选择一期自动日报…</option>
+{% for entry in entries %}
+              <option value="{{ entry.date }}">{{ entry.date }}</option>
+{% endfor %}
+            </select>
+            <p class="field-help">选定日期后，会把那一期的自动日报填进右侧编辑框。</p>
+          </div>
+          <div class="form-actions">
+            <button class="button button-primary" id="workbench-generate" type="button">生成日报</button>
+            <button class="button button-secondary" id="workbench-sample" type="button">填入示例</button>
+          </div>
+          <p class="privacy-note"><span class="local-dot" aria-hidden="true"></span><span><strong>本地整理</strong> · 填写的内容不会上传，也不会推送到飞书或邮箱。</span></p>
+        </section>
+        <section class="panel" aria-labelledby="workbench-preview-title">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Step 02 · 预览与编辑</p>
+              <h2 id="workbench-preview-title">你的日报</h2>
+              <p class="preview-status" id="workbench-status" data-state="empty" aria-live="polite">填写内容后，生成一份日报预览</p>
+            </div>
+            <span class="step-number" aria-hidden="true">02</span>
+          </div>
+          <div class="paper">
+            <div class="paper-topline">
+              <p class="paper-label">Daily report</p>
+              <p class="paper-date" id="workbench-paper-date">等待生成</p>
+            </div>
+            <label class="visually-hidden" for="workbench-output">可编辑的日报内容</label>
+            <textarea class="report-content" id="workbench-output" placeholder="生成后，日报会显示在这里。可以直接修改，再复制使用。"></textarea>
+            <div class="preview-footer">
+              <p class="preview-hint">生成内容可自由编辑；空白栏目会写「未填写」。</p>
+              <button class="button button-secondary button-small" id="workbench-copy" type="button" disabled>复制日报</button>
+            </div>
+          </div>
+        </section>
+      </section>
+      <section class="panel" aria-labelledby="draft-title">
+        <div class="panel-heading">
+          <div>
+            <p class="panel-kicker">Step 03 · 本地草稿</p>
+            <h2 id="draft-title">本地日报历史</h2>
+            <p class="preview-status" id="draft-status">生成日报后会自动保存在这里</p>
+          </div>
+          <div class="history-head-tools">
+            <span class="draft-note" id="draft-note"><span class="local-dot" aria-hidden="true"></span>仅保存在本机浏览器</span>
+            <button class="button button-secondary button-small" id="draft-clear" type="button">清空全部</button>
+          </div>
+        </div>
+        <p class="history-empty" id="draft-empty">还没有本地草稿。生成一篇手写日报后，它会保存在当前浏览器中，随时可以载入继续编辑。</p>
+        <ul class="draft-list" id="draft-list" hidden></ul>
+      </section>
+    </div>
+{% endif %}
+    <section class="panel">
+      <div class="panel-heading">
+        <div>
+          <p class="panel-kicker">Archive · 日报存档</p>
+          <h2>历史日报</h2>
+        </div>
+        <span class="note-chip"><span class="local-dot" aria-hidden="true"></span>按日期倒序</span>
+      </div>
+{% if entries %}
+      <ul class="history-list">
+{% for entry in entries %}
+        <li>
+          <a class="history-item" href="{{ entry.site_file }}">
+            <span class="history-info">
+              <span class="history-date">{{ entry.date }}</span>
+              <span class="history-meta">{{ entry.member_count }} 名成员</span>
+            </span>
+            <span class="history-actions">
+              <span class="history-meta">生成于 {{ entry.generated_at }}</span>
+              <span class="button button-secondary button-small">查看</span>
+            </span>
+          </a>
+        </li>
+{% endfor %}
+      </ul>
 {% else %}
-    <p class="empty">暂无日报</p>
+      <p class="history-empty">暂无日报</p>
+{% endif %}
+    </section>
+{% if attribution %}
+    <p class="attribution">{{ attribution }}</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if interactive %}
+  <script id="workbench-data" type="application/json">{{ workbench_data|safe }}</script>
+  <script>{{ workbench_js|safe }}</script>
 {% endif %}
 {% endblock %}

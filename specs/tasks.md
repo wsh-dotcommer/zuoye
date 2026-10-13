@@ -3,7 +3,7 @@
 ## 元信息
 
 - 关联规范：`specs/proposal.md`、`specs/design.md`
-- 任务总数：19（v1.1 新增 Task 11，v1.2 新增 Task 12，v2.0 新增 Task 13/14/15，v2.1 新增 Task 16，v2.2 新增 Task 17，v2.3 新增 Task 18/19）
+- 任务总数：21（v1.1 新增 Task 11，v1.2 新增 Task 12，v2.0 新增 Task 13/14/15，v2.1 新增 Task 16，v2.2 新增 Task 17，v2.3 新增 Task 18/19，v2.4 新增 Task 20/21）
 - 预计总执行时间：4 到 6h（包含测试）
 - 执行策略：按依赖关系顺序执行，独立任务可并行执行
 - 相对书中的扩展点：书中采集层为 GitHub + 飞书任务 + 飞书消息，本期改为三个 GitHub 采集器（Task 3/4/5）；书中无静态站，本期把站点渲染并入生成层（Task 6）并在 Task 1 落地 `docs/` 与 Pages 基础文件。
@@ -20,6 +20,7 @@
 | v2.1 | 需求变更 | 新增 Task 16「日报列出提交变更文件名」；修改 Task 3 的验收标准（`CommitRecord` 字段数 7 → 8）；执行顺序追加"阶段 13：Task 16" |
 | v2.2 | 需求变更 | 新增 Task 17「条目链接与任务上下文」；修改 Task 3/4/5/6 的验收标准（链接与上下文字段、HTML 锚点渲染、单人团队合并）；执行顺序追加"阶段 14：Task 17" |
 | v2.3 | 需求变更 | 新增 Task 18「近 N 期趋势与对比」、Task 19「飞书群消息只读数据源」；修改 Task 2 的验收标准（结构化统计列与幂等迁移）；执行顺序追加"阶段 15–16" |
+| v2.4 | 需求变更 | 新增 Task 20「数据来源标注与日报可读性改进」、Task 21「飞书任务状态同步」；修改 Task 6 的验收标准（标题分级、头部拆行、空板块合并、提交行两行制、趋势门槛 3 期、四处来源标注）；执行顺序追加"阶段 17–18" |
 
 ---
 
@@ -467,6 +468,57 @@ v1.1.1 补充验收标准（缺陷修复）：
 
 ---
 
+## Task 20: 数据来源标注与日报可读性改进（新增 v2.4）
+
+描述：给所有对外产物末尾追加统一格式的三要素来源标注（数据源全称 / 采集时间 / 授权使用范围），同时修掉日报页面在手机端的五处可读性问题。
+
+输入：`specs/proposal.md` §2.1（数据来源标注、静态日报站可读性）/§3.1，`specs/design.md` §3（`DataSourceRef`）、§4.2、§4.3、§4.4、§6.8、ADR-010
+
+输出：`shared/models.py`（`DataSourceRef`、`DailyReport.attribution`）、`shared/config.py`（`report.attribution`）、`generator/formatter.py`（`build_attribution`、标题分级、头部拆行、空板块合并、提交 `entries`、趋势门槛）、`generator/templates/*`、`notifier/lark_bot.py`（截断保留标注）、`main.py`（`_source_refs`）、`config.yaml.example` + `tests/test_attribution.py`
+
+依赖：Task 2、Task 6、Task 8
+
+验收标准：
+
+- [ ] 配置新增 `report.attribution.enabled`（默认 `true`）与 `report.attribution.scope`（默认「仅限团队内部日报展示」）
+- [ ] 标注整行固定为 `数据来源：<各源全称> ｜ 采集时间：YYYY-MM-DD HH:MM（时区）｜ 授权范围：<scope>`，三要素齐全且顺序不变
+- [ ] 四处末尾都出现同一行标注：邮件 Markdown、邮件 HTML、飞书卡片 payload、站点详情页与索引页
+- [ ] 数据源全称只列本次实际参与采集的源（GitHub 仓库 / 飞书群 / 飞书任务），未启用的源不出现
+- [ ] `source_refs` 为空（关闭开关）时，四处都不出现标注，其余产物逐字不变；改 `scope` 后四处同步变化
+- [ ] 飞书卡片正文超长被截断时，标注行仍完整保留在末尾，总长度不超 `MAX_MARKDOWN_LENGTH + 40`
+- [ ] 正文大标题不再带日期（`<h1>` 与 Markdown 首行），日期出现在头部 `- 日期：` 行；`<title>` 仍保留完整标题
+- [ ] 同一份日报里 ≥ 2 个内容板块为空时合并成一行 `今日无记录：板块 A、板块 B`；工时统计与飞书任务不参与合并；只剩 1 个空板块时保留原样
+- [ ] 趋势行与索引页 SVG 趋势区块的门槛同步改为 3 期；2 期时两处都不出现
+- [ ] HTML 侧提交行为两行（主行 + 元信息行），Markdown 与飞书卡片仍是单行
+- [ ] 既有断言按新形态更新，`pytest` 全绿；新建 `tests/test_attribution.py` 覆盖三要素、关闭开关、截断保留、四处一致性
+
+---
+
+## Task 21: 飞书任务状态同步（新增 v2.4）
+
+描述：新增只读采集器读取飞书工作台任务快照，在「任务进展」板块下新增子小节，按"已完成 / 进行中 / 未开始"三态展示。本期不做定时刷新（快照口径，见 design.md ADR-011）。
+
+输入：`specs/proposal.md` §2.1（飞书任务状态同步）/§2.2/§3.1，`specs/design.md` §2、§3（`FeishuTaskRecord`）、§4.1、§4.2、§6.1、§6.8、ADR-011
+
+输出：`collector/feishu_task.py`、`shared/models.py`（`SOURCE_FEISHU_TASK`、`STATUS_NOT_STARTED`、`FeishuTaskRecord`）、`shared/config.py`（`sources.feishu.tasks`）、`generator/formatter.py`（`_feishu_task_section`）、`main.py`、`config.yaml.example` + `tests/test_feishu_task.py` 与集成测试
+
+依赖：Task 2、Task 6、Task 19（复用 `FeishuClient` 与 `build_client`）
+
+验收标准：
+
+- [ ] 配置新增 `sources.feishu.tasks`（`enabled`/`scope: all|tasklist`/`tasklist_guids`/`max_tasks`），默认 `false`；`scope: tasklist` 但清单为空时启动即报配置错误
+- [ ] 未启用时采集器不发任何请求，日报里不出现任何飞书任务字样（产物与 v2.3 逐字一致）
+- [ ] 三态映射：`completed_at` 非空且非 `0` → 已完成；未完成且开始时间在未来 → 未开始；其余未完成 → 进行中；无 `start` 字段时退化为"未完成即进行中"
+- [ ] 日报「任务进展」下出现子小节 `任务进展 · 飞书任务`，只渲染一次（挂在第一个成员上）；首行给快照时间与三态计数，逐条 `状态 · 标题（截止日期）`
+- [ ] 排序 `进行中 → 未开始 → 已完成`，组内按截止日期升序；最多 20 条，超出追加"其余 N 条见飞书任务"，计数仍报全量
+- [ ] 目标日期 ≠ 生成当天时标题带「补跑快照」；任务为空显示"飞书工作台暂无任务"；源失败显示"飞书任务数据获取失败（原因）"
+- [ ] 权限错误 `99991672` 被翻译成"补 `task:task:read` / `task:tasklist:read` 权限并重新发布"的可执行提示，不把原始英文报文塞进日报
+- [ ] 任务描述字段不进入模型、产物与日志；不对飞书做任何写操作
+- [ ] 该源失败只标记该源失败，其它数据源、日报生成、站点渲染与推送都不受影响
+- [ ] 全部使用 `httpx.MockTransport`，不访问真实网络；`pytest` 全绿；真机验证需先在开发者后台补权限并重新发布（未补权限时以"可执行提示"形态通过）
+
+---
+
 ## 执行顺序
 
 推荐执行顺序（考虑依赖关系和并行机会）：
@@ -487,3 +539,5 @@ v1.1.1 补充验收标准（缺陷修复）：
 - 阶段 14：Task 17（条目链接与任务上下文，v2.2 新增）
 - 阶段 15：Task 18（近 N 期趋势与对比，v2.3 新增）
 - 阶段 16：Task 19（飞书群消息只读数据源，v2.3 新增）
+- 阶段 17：Task 20（数据来源标注与日报可读性改进，v2.4 新增）
+- 阶段 18：Task 21（飞书任务状态同步，v2.4 新增；不需定时刷新，见 design.md ADR-011）

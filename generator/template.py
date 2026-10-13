@@ -84,6 +84,7 @@ def render_index_html(
     generated_at: str,
     interactive: bool = True,
     trend: dict | None = None,
+    attribution: str = "",
 ) -> str:
     """渲染静态站索引页（含工作台、历史载荷与近 N 期趋势）。"""
 
@@ -96,6 +97,7 @@ def render_index_html(
         generated_at=generated_at,
         interactive=interactive,
         trend=trend,
+        attribution=attribution,
         workbench_data=render_workbench_data(entries),
         workbench_js=render_workbench_js() if interactive else "",
     )

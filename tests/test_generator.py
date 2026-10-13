@@ -11,9 +11,11 @@ from shared.config import MemberConfig
 from shared.models import (
     SOURCE_COMMIT,
     SOURCE_DISCUSSION,
+    SOURCE_FEISHU_TASK,
     SOURCE_ISSUE,
     ChatSummaryRecord,
     CommitRecord,
+    FeishuTaskRecord,
     MessageRecord,
     ReportStats,
     SourceStatus,
@@ -81,9 +83,11 @@ def test_markdown_contains_three_sections() -> None:
     report = _report()
     markdown = report.markdown
 
-    assert markdown.startswith("# 测试团队 智能日报 · 2026-09-18")
-    # HTML 侧（邮件正文与站点页共用）的标题也要带团队名
-    assert "<h1>测试团队 智能日报 · 2026-09-18</h1>" in report.html
+    # v2.4：正文大标题只放团队名，日期移到头部信息行（手机端不再折行断日期）
+    assert markdown.startswith("# 测试团队 智能日报\n")
+    assert "- 日期：2026-09-18" in markdown
+    assert "<h1>测试团队 智能日报</h1>" in report.html
+    # 页面标题（浏览器标签/邮件标题栏）仍保留完整标题
     assert "<title>测试团队 智能日报 · 2026-09-18</title>" in report.html
     assert "## 红豆（wsh-dotcommer）" in markdown
     assert "## 张三（zhangsan）" in markdown
@@ -128,11 +132,14 @@ def test_header_shows_comparison_and_trend_when_history_exists() -> None:
         MESSAGES,
         STATUSES_OK,
         "测试团队",
-        recent=[ReportStats(date=date(2026, 9, 17))],
+        recent=[
+            ReportStats(date=date(2026, 9, 16)),
+            ReportStats(date=date(2026, 9, 17)),
+        ],
     )
 
     assert "- 对比上期（2026-09-17）：提交 +1 · 任务 +1 · 沟通 +1 · 工时 +0.5h" in report.markdown
-    assert "- 近 2 期：提交 ▁█（1 条） · 工时 ▁█（0.5h）" in report.markdown
+    assert "- 近 3 期：提交 ▁▁█（1 条） · 工时 ▁▁█（0.5h）" in report.markdown
     assert "head-lines" in report.html  # HTML 版与 Markdown 用同一份 view
 
 
@@ -141,6 +148,24 @@ def test_header_hides_comparison_and_trend_without_history() -> None:
 
     assert "对比上期" not in markdown
     assert "期：提交" not in markdown  # 只有当期一个点，趋势行不出现
+
+
+def test_trend_line_requires_three_periods() -> None:
+    """v2.4：两期合计容易被误读成当日数据，少于三期整行不出现。"""
+
+    markdown = formatter.generate(
+        date(2026, 9, 18),
+        MEMBERS,
+        COMMITS,
+        TASKS,
+        MESSAGES,
+        STATUSES_OK,
+        "测试团队",
+        recent=[ReportStats(date=date(2026, 9, 17))],
+    ).markdown
+
+    assert "对比上期（2026-09-17）" in markdown
+    assert "期：提交" not in markdown
 
 
 def test_sparkline_edge_cases() -> None:
@@ -279,8 +304,36 @@ def test_empty_member_sections_show_placeholder() -> None:
     markdown = _report().markdown
     zhang_section = markdown.split("## 张三（zhangsan）", 1)[1]
 
-    assert zhang_section.count("- 今日无记录") == 2  # 代码提交与任务进展为空；协作沟通为失败
+    # v2.4：≥2 个空板块合并成一行（协作沟通是失败态，不参与合并）
+    assert zhang_section.count("### 代码提交") == 0
+    assert "- 今日无记录：代码提交、任务进展" in zhang_section
+    assert zhang_section.count("- 今日无记录") == 1
     assert "- 数据获取失败（GitHub API 超时）" in zhang_section
+
+
+def test_merge_empty_sections_rules() -> None:
+    """v2.4 合并规则：≥2 个空板块才合并，工时统计永远不参与合并。"""
+
+    def block(key: str, title: str, state: str, note: str = "今日无记录") -> dict:
+        return {"key": key, "title": title, "state": state, "lines": [], "entries": [], "note": note}
+
+    sections = [
+        block("commits", "代码提交", "empty"),
+        block("tasks", "任务进展", "ok"),
+        block("hours", "工时统计", "empty", "0h（今日无记录）"),
+    ]
+    assert [item["title"] for item in formatter._merge_empty_sections(sections)] == [
+        "代码提交",
+        "任务进展",
+        "工时统计",
+    ]
+
+    sections.insert(2, block("messages", "协作沟通", "empty"))
+    merged = formatter._merge_empty_sections(sections)
+
+    assert [item["title"] for item in merged] == ["今日无记录", "任务进展", "工时统计"]
+    assert merged[0]["note"] == "今日无记录：代码提交、协作沟通"
+    assert merged[0]["merged"] is True
 
 
 def test_html_is_escaped_and_renders_sections() -> None:
@@ -322,3 +375,113 @@ def test_content_preview_truncates_long_message() -> None:
 
     assert "…" in report.markdown
     assert long_text not in report.markdown
+
+
+# ===== v2.4：飞书任务状态快照 =====
+
+FEISHU_TASKS = [
+    FeishuTaskRecord(guid="t-done", summary="已经做完的事", status="已完成", due=date(2026, 9, 15)),
+    FeishuTaskRecord(guid="t-doing", summary="正在做的事", status="进行中", due=date(2026, 9, 20)),
+    FeishuTaskRecord(guid="t-todo", summary="还没开始的事", status="未开始"),
+]
+TASK_STATUS = SourceStatus(name=SOURCE_FEISHU_TASK, ok=True, count=3)
+
+
+def _task_report(statuses=None, tasks=None):
+    return formatter.generate(
+        date(2026, 9, 18),
+        MEMBERS,
+        COMMITS,
+        TASKS,
+        MESSAGES,
+        statuses if statuses is not None else [*STATUSES_OK, TASK_STATUS],
+        "测试团队",
+        feishu_tasks=FEISHU_TASKS if tasks is None else tasks,
+    )
+
+
+def test_feishu_task_section_lists_three_states() -> None:
+    markdown = _task_report().markdown
+
+    assert "### 任务进展 · 飞书任务" in markdown
+    assert "共 3 条：进行中 1 · 未开始 1 · 已完成 1" in markdown
+    # 排序：进行中 → 未开始 → 已完成，同组按截止日期升序（无截止排最后）
+    doing = markdown.index("- ● 进行中 · 正在做的事（截止 2026-09-20）")
+    todo = markdown.index("- ○ 未开始 · 还没开始的事")
+    done = markdown.index("- ✓ 已完成 · 已经做完的事（截止 2026-09-15）")
+    assert doing < todo < done
+    # 小节的物理位置：挂在「任务进展」之后、「工时统计」之前
+    assert markdown.index("### 任务进展\n") < doing < markdown.index("### 工时统计")
+
+
+def test_feishu_task_section_absent_when_source_not_enabled() -> None:
+    markdown = formatter.generate(
+        date(2026, 9, 18), MEMBERS, COMMITS, TASKS, MESSAGES, STATUSES_OK, "测试团队"
+    ).markdown
+
+    assert "飞书任务" not in markdown
+    assert "### 任务进展\n" in markdown
+
+
+def test_feishu_task_section_failed_shows_actionable_note() -> None:
+    statuses = [
+        *STATUSES_OK,
+        SourceStatus(
+            name=SOURCE_FEISHU_TASK,
+            ok=False,
+            count=0,
+            error="飞书任务接口未授权：请在开发者后台添加 task:task:read 权限",
+        ),
+    ]
+    markdown = _task_report(statuses=statuses, tasks=[]).markdown
+
+    assert "飞书任务数据获取失败" in markdown
+    assert "task:task:read" in markdown
+
+
+def test_feishu_task_section_empty_state() -> None:
+    markdown = _task_report(tasks=[]).markdown
+
+    assert "### 任务进展 · 飞书任务" in markdown
+    assert "飞书工作台暂无任务" in markdown
+
+
+def test_feishu_task_section_marks_backfill_and_truncates() -> None:
+    many = [
+        FeishuTaskRecord(guid=f"t-{index}", summary=f"任务 {index}", status="进行中")
+        for index in range(25)
+    ]
+    markdown = _task_report(tasks=many).markdown
+
+    # 目标日期不是"今天"时显式标注补跑，避免被读成当天发生的流转
+    assert "### 任务进展 · 飞书任务（补跑快照）" in markdown
+    assert "共 25 条：进行中 25" in markdown
+    assert "- …（其余 5 条见飞书任务）" in markdown
+    assert markdown.count("- ● 进行中 · 任务 ") == 20  # 最多列 FEISHU_TASK_LIMIT 条
+
+
+def test_commit_html_uses_two_row_entries() -> None:
+    """v2.4：HTML 侧提交行拆成"主行 + 元信息行"，Markdown 侧保持单行。"""
+
+    report = _report()
+
+    assert '<li class="line-entry">' in report.html
+    assert '<span class="line-main">octo/demo feat: 新增静态日报站</span>' in report.html
+    assert '<span class="line-meta">' in report.html
+    assert "line-meta" in report.html
+    # 两行制只在 HTML 生效：Markdown（也就是飞书卡片）仍是原来的单行
+    assert (
+        "- `octo/demo` [abc1234](https://github.com/octo/demo/commit/abc1234def) "
+        "feat: 新增静态日报站（+120/-3，4 个文件：a.py、b.py、c.py、d.py）"
+    ) in report.markdown
+
+
+def test_commit_entries_omit_link_when_url_missing() -> None:
+    commits = [replace(COMMITS[0], url="")]
+
+    report = formatter.generate(
+        date(2026, 9, 18), MEMBERS, commits, TASKS, MESSAGES, STATUSES, "测试团队"
+    )
+
+    assert '<span class="line-meta">abc1234 · ' in report.html
+    assert "[abc1234](" not in report.html

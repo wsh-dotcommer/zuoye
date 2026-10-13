@@ -166,6 +166,54 @@ def _patch_feishu(monkeypatch: pytest.MonkeyPatch, handler) -> None:
     monkeypatch.setattr(feishu_message, "build_client", factory)
 
 
+def _write_config_with_feishu_tasks(tmp_path: Path) -> Path:
+    """飞书任务同步开启、群消息关闭：只验证任务这条链路（v2.4）。"""
+
+    text = config_text(tmp_path, retry_times=1).replace(
+        "sources:\n  github:",
+        "sources:\n  feishu:\n    enabled: false\n"
+        "    app_id: cli_demo\n    app_secret: app-secret\n"
+        "    tasks:\n      enabled: true\n      scope: all\n  github:",
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _tasks_handler(*, ok: bool = True):
+    """任务接口的 Mock：1 条已完成、1 条进行中、1 条未开始，外加一条权限错误分支。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return httpx.Response(200, json={"code": 0, "tenant_access_token": "t-demo"})
+        if request.url.path == "/open-apis/task/v2/tasks":
+            if not ok:
+                return httpx.Response(
+                    400,
+                    json={
+                        "code": 99991672,
+                        "msg": "Access denied. One of the following scopes is required: "
+                        "[task:task:read, task:task:write]",
+                    },
+                )
+            items = [
+                {"guid": "t-done", "summary": "静态日报站上线", "completed_at": "1790000000"},
+                {"guid": "t-doing", "summary": "补集成测试", "completed_at": "0"},
+                {
+                    "guid": "t-todo",
+                    "summary": "写验收文档",
+                    "completed_at": "0",
+                    "start": {"timestamp": "2524608000"},
+                },
+            ]
+            return httpx.Response(
+                200, json={"code": 0, "data": {"items": items, "has_more": False}}
+            )
+        return httpx.Response(404, json={"msg": "not found"})
+
+    return handler
+
+
 def test_full_pipeline_generates_report_and_site(tmp_path: Path, monkeypatch) -> None:
     api = FakeApi()
     _patch_collectors(monkeypatch, api)
@@ -240,7 +288,9 @@ def test_empty_data_shows_placeholder(tmp_path: Path, monkeypatch) -> None:
 
     assert exit_code == 0
     markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
-    assert markdown.count("- 今日无记录") == 6  # 2 名成员 × 3 个板块
+    # v2.4：每位成员的空板块合并成一行，因此每人只剩一条合并占位
+    assert markdown.count("- 今日无记录") == 2
+    assert "- 今日无记录：代码提交、任务进展、协作沟通" in markdown
     assert "- 0h（今日无记录）" in markdown
     assert "- 工时：团队合计 0h · 人均 0h" in markdown
 
@@ -384,15 +434,92 @@ def test_second_run_adds_comparison_trend_and_site_chart(tmp_path: Path, monkeyp
     _patch_collectors(monkeypatch, api)
     config_path = _write_config(tmp_path)
 
+    assert main_module.main(["--config", str(config_path), "--date", "2026-09-16", "--dry-run"]) == 0
     assert main_module.main(["--config", str(config_path), "--date", "2026-09-17", "--dry-run"]) == 0
     assert main_module.main(["--config", str(config_path), "--date", DAY, "--dry-run"]) == 0
 
     markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
     assert "- 对比上期（2026-09-17）：提交 +2 · 任务 +1 · 沟通 +1 · 工时 +1h" in markdown
-    assert "- 近 2 期：提交 ▁█（2 条） · 工时 ▁█（1h）" in markdown
+    assert "- 近 3 期：提交 ▁▁█（2 条） · 工时 ▁▁█（1h）" in markdown
 
     index = (tmp_path / "docs" / "index.html").read_text(encoding="utf-8")
     assert 'id="trend-title"' in index and "<svg" in index
+
+
+def test_pipeline_includes_feishu_task_statuses(tmp_path: Path, monkeypatch) -> None:
+    """v2.4：任务进展板块里出现飞书任务快照，三态齐全（集成）。"""
+
+    api = FakeApi()
+    _patch_collectors(monkeypatch, api)
+    _patch_feishu(monkeypatch, _tasks_handler())
+    config_path = _write_config_with_feishu_tasks(tmp_path)
+
+    assert main_module.main(["--config", str(config_path), "--date", DAY, "--dry-run"]) == 0
+
+    markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
+    assert "### 任务进展 · 飞书任务" in markdown
+    assert "共 3 条：进行中 1 · 未开始 1 · 已完成 1" in markdown
+    assert "- ● 进行中 · 补集成测试" in markdown
+    assert "- ○ 未开始 · 写验收文档" in markdown
+    assert "- ✓ 已完成 · 静态日报站上线" in markdown
+    # 数据源徽章与标注都要认这个新源
+    assert "飞书任务 1 条" not in markdown  # 徽章报的是本次采集条数（3），不是任务清单数
+    assert "飞书任务 3 条" in markdown
+    assert "数据来源：GitHub 仓库 octo/demo、飞书任务" in markdown
+
+    detail = (tmp_path / "docs" / f"daily-report-{DAY}.html").read_text(encoding="utf-8")
+    assert "<h4>任务进展 · 飞书任务" in detail
+    assert '<p class="attribution">数据来源：GitHub 仓库 octo/demo、飞书任务' in detail
+
+
+def test_pipeline_degrades_when_feishu_tasks_fail(tmp_path: Path, monkeypatch) -> None:
+    api = FakeApi()
+    _patch_collectors(monkeypatch, api)
+    _patch_feishu(monkeypatch, _tasks_handler(ok=False))
+    config_path = _write_config_with_feishu_tasks(tmp_path)
+
+    assert main_module.main(["--config", str(config_path), "--date", DAY, "--dry-run"]) == 0
+
+    markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
+    assert "飞书任务数据获取失败" in markdown
+    assert "task:task:read" in markdown  # 提示要可执行，不能只丢原始错误码
+    assert "### 代码提交" in markdown  # 其它源不受影响
+    assert "- [#1]" in markdown
+
+
+def test_attribution_can_be_disabled_by_config(tmp_path: Path, monkeypatch) -> None:
+    api = FakeApi()
+    _patch_collectors(monkeypatch, api)
+    config_path = _write_config(tmp_path)
+    text = config_path.read_text(encoding="utf-8").replace(
+        "  skip_weekends: false",
+        "  skip_weekends: false\n  attribution:\n    enabled: false",
+    )
+    config_path.write_text(text, encoding="utf-8")
+
+    assert main_module.main(["--config", str(config_path), "--date", DAY, "--dry-run"]) == 0
+
+    markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
+    index = (tmp_path / "docs" / "index.html").read_text(encoding="utf-8")
+    assert "数据来源" not in markdown
+    assert '<p class="attribution">' not in index
+
+
+def test_attribution_scope_is_configurable(tmp_path: Path, monkeypatch) -> None:
+    api = FakeApi()
+    _patch_collectors(monkeypatch, api)
+    config_path = _write_config(tmp_path)
+    text = config_path.read_text(encoding="utf-8").replace(
+        "  skip_weekends: false",
+        "  skip_weekends: false\n  attribution:\n    scope: 仅限甲方内部查阅",
+    )
+    config_path.write_text(text, encoding="utf-8")
+
+    assert main_module.main(["--config", str(config_path), "--date", DAY, "--dry-run"]) == 0
+
+    markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
+    assert "授权范围：仅限甲方内部查阅" in markdown
+    assert "（北京时间）" in markdown
 
 
 def test_check_passes_with_feishu_source(tmp_path: Path, monkeypatch) -> None:

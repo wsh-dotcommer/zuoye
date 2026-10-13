@@ -49,7 +49,9 @@ def test_render_site_writes_expected_files(tmp_path: Path) -> None:
     # v2.0：Markdown 原文作为工作台载荷内联在页面末尾的脚本里，
     # 因此这里只检查正文区域不残留 Markdown 标记。
     assert "### " not in detail.split('<script id="workbench-data"', 1)[0]
-    assert "<h3>代码提交</h3>" in detail
+    # v2.4：本期三个板块全空，合并成一行占位；工时板块保留自己的标题
+    assert '<p class="empty-line">今日无记录：代码提交、任务进展、协作沟通</p>' in detail
+    assert "<h3>工时统计</h3>" in detail
 
 
 def test_index_skips_history_with_missing_detail_file(tmp_path: Path) -> None:
@@ -140,6 +142,7 @@ def test_index_renders_inline_svg_trend(tmp_path: Path) -> None:
     history = [
         _stats_entry(date(2026, 9, 16), commits=1, hours=0.5),
         _stats_entry(date(2026, 9, 17), commits=3, hours=1.0),
+        _stats_entry(date(2026, 9, 15), commits=2, hours=0.5),
     ]
     for entry in history:
         (docs / entry.site_file).write_text("<html>详情</html>", encoding="utf-8")
@@ -151,7 +154,7 @@ def test_index_renders_inline_svg_trend(tmp_path: Path) -> None:
     )
     index = (docs / "index.html").read_text(encoding="utf-8")
 
-    assert "近 2 期" in index
+    assert "近 3 期" in index
     assert "<svg" in index and 'id="trend-title"' in index
     assert "<script" not in index  # 零 JS：趋势图是内联 SVG，没引入任何脚本或库
 

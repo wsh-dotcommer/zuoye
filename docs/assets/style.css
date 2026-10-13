@@ -94,6 +94,18 @@ h1 {
   line-height: 1.25;
 }
 .intro-copy { max-width: 62ch; margin-bottom: 0; color: var(--ink-soft); font-size: 15px; line-height: 1.75; }
+.intro-hours { margin-top: 6px; }
+
+/* 数据来源标注（v2.4）：三端产物末尾统一出现 */
+.attribution {
+  margin: 26px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
 
 /* 面板 */
 .panel {
@@ -184,6 +196,30 @@ h3 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .01em; }
   line-height: 1.65;
 }
 .failed-box { border-color: #e3b7b2; background: var(--danger-soft); color: var(--danger); }
+
+/* v2.4：同一次日报里多个板块为空时合并成一行，不再各占一个虚线大方框 */
+.empty-line {
+  margin: 0;
+  padding: 4px 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+/* v2.4：飞书任务子小节（挂在「任务进展」之下，视觉上降一级） */
+.block-sub { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e6ece8; }
+h4 { margin: 0; font-size: 13.5px; font-weight: 680; color: var(--ink-soft); }
+
+/* v2.4：提交行两行制——主行放提交信息，元信息行放短号与变更统计 */
+.line-entry { margin: 6px 0; }
+.line-main { display: block; }
+.line-meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
 
 /* 索引页列表 */
 .history-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }

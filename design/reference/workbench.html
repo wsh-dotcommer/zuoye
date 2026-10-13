@@ -1,0 +1,697 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f6f4">
+  <title>日报工作台 · 日报生成器</title>
+  <style>
+/* OD-LAYOUT-PRIMITIVES v1 — structure only: display, flex/grid, overflow, wrapping, ratio.
+   Put this @layer first; product CSS outside the layer always wins. */
+@layer od-layout {
+  :where(.od-stack,.od-row,.od-row-top,.od-cluster,.od-grid,.od-field,.od-stat,.od-cell,.od-tile) > :where(*) { min-width: 0; }
+  .od-stack   { display: flex; flex-direction: column; gap: var(--od-gap, 8px); }
+  .od-row     { display: flex; align-items: center; gap: var(--od-gap, 8px); }
+  .od-row-top { display: flex; align-items: flex-start; gap: var(--od-gap, 8px); }
+  .od-cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--od-gap, 8px); }
+  .od-fill    { flex: 1 1 0; min-width: 0; }
+  .od-fixed   { flex: none; }
+  .od-grid    { display: grid; gap: var(--od-gap, 12px); grid-template-columns: repeat(var(--od-cols, 3), minmax(0, 1fr)); }
+  .od-stat, .od-field, .od-cell { display: grid; gap: var(--od-gap, 2px); }
+  :where(.od-stat,.od-field,.od-cell) > :where(*) { display: block; }
+  .od-tile { display: grid; grid-template-rows: auto 1fr; }
+  :where(.od-tile) > :where(*) { display: block; }
+  .od-media { display: block; width: 100%; height: auto; aspect-ratio: var(--od-ratio, auto); }
+  .od-media-cover { object-fit: cover; }
+  .od-truncate { display: block; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .od-clamp-2, .od-clamp-3 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .od-clamp-2 { -webkit-line-clamp: 2; }
+  .od-clamp-3 { -webkit-line-clamp: 3; }
+  .od-lines-2 { min-height: calc(2 * 1.4em); }
+  .od-nowrap  { white-space: nowrap; }
+  .od-keep    { word-break: keep-all; overflow-wrap: anywhere; }
+  .od-screen { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; }
+  .od-scroll { overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+  .od-rail { display: flex; gap: var(--od-gap, 8px); overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; padding-inline: var(--od-rail-pad, 16px); scroll-padding-inline: var(--od-rail-pad, 16px); }
+  .od-rail::-webkit-scrollbar { display: none; }
+  :where(.od-rail) > :where(*) { flex: none; scroll-snap-align: start; }
+  :where(.od-rail) > :where(:last-child) { margin-inline-end: var(--od-rail-pad, 16px); }
+  .od-spacer { flex: none; visibility: hidden; pointer-events: none; }
+  .od-touch  { min-width: 44px; min-height: 44px; }
+}
+/* /OD-LAYOUT-PRIMITIVES v1 */
+
+    :root {
+      color-scheme: light;
+      --page: #f3f6f4;
+      --surface: #ffffff;
+      --surface-soft: #f8faf9;
+      --ink: #1d2925;
+      --ink-soft: #53625c;
+      --ink-muted: #697770;
+      --line: #dce5e0;
+      --line-strong: #c9d6cf;
+      --accent: #176b5b;
+      --accent-hover: #105749;
+      --accent-soft: #e7f3ee;
+      --danger: #a53939;
+      --danger-soft: #fff1ef;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+      --shadow-panel: 0 18px 52px rgba(33, 60, 49, .07);
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --space-8: 32px;
+      --space-10: 40px;
+      --space-12: 48px;
+      --ease-out: cubic-bezier(.2, .75, .25, 1);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: var(--page);
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+
+    * { box-sizing: border-box; }
+    body { min-width: 320px; min-height: 100vh; margin: 0; background: var(--page); color: var(--ink); font-size: 16px; line-height: 1.6; }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid rgba(23, 107, 91, .28); outline-offset: 2px; }
+    button:disabled { cursor: not-allowed; opacity: .54; }
+    .app-header { min-height: 72px; display: flex; align-items: center; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.88); }
+    .header-inner { width: min(1360px, calc(100% - 64px)); margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: #fff; background: var(--accent); font-weight: 700; font-size: 14px; letter-spacing: .04em; }
+    .brand-name { font-size: 15px; font-weight: 680; letter-spacing: .02em; }
+    .brand-context { display: block; margin-top: -2px; color: var(--ink-muted); font-size: 12px; }
+    .local-note { display: flex; align-items: center; gap: 9px; color: var(--ink-soft); font-size: 13px; }
+    .local-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #3b8a71; box-shadow: 0 0 0 3px #e5f2ec; }
+    .page { width: min(1360px, calc(100% - 64px)); margin: 0 auto; padding: clamp(36px, 6vw, 72px) 0 64px; }
+    .page-intro { max-width: 720px; margin-bottom: 36px; }
+    .eyebrow { margin: 0 0 10px; color: var(--accent); font-size: 12px; font-weight: 720; letter-spacing: .12em; text-transform: uppercase; }
+    h1, h2, p { margin-top: 0; }
+    h1 { margin-bottom: 12px; font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif; font-size: clamp(30px, 4vw, 42px); font-weight: 600; letter-spacing: .015em; line-height: 1.25; }
+    .intro-copy { max-width: 60ch; margin-bottom: 0; color: var(--ink-soft); font-size: 16px; line-height: 1.75; }
+    .workspace { display: grid; grid-template-columns: minmax(0, .94fr) minmax(0, 1.06fr); align-items: stretch; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-panel); }
+    .form-panel { padding: clamp(24px, 3.2vw, 44px); }
+    .preview-panel { min-width: 0; padding: clamp(24px, 3.2vw, 44px); border-left: 1px solid var(--line); background: var(--surface-soft); }
+    .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
+    .panel-kicker { margin: 0 0 5px; color: var(--ink-muted); font-size: 12px; font-weight: 650; letter-spacing: .08em; }
+    h2 { margin-bottom: 0; font-size: 19px; font-weight: 700; letter-spacing: .005em; line-height: 1.4; }
+    .step-number { width: 30px; height: 30px; display: grid; place-items: center; flex: none; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+    .form-stack { display: flex; flex-direction: column; gap: 22px; }
+    .field { display: grid; gap: 7px; }
+    .field-label { color: var(--ink); font-size: 14px; font-weight: 650; }
+    .required-mark { color: var(--accent); }
+    .field-help { margin: 0; color: var(--ink-muted); font-size: 12px; line-height: 1.55; }
+    .text-input, .text-area { width: 100%; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: #fff; color: var(--ink); transition: border-color 180ms var(--ease-out), box-shadow 180ms var(--ease-out); }
+    .text-input { height: 46px; padding: 0 13px; }
+    .text-area { min-height: 116px; padding: 11px 13px; resize: vertical; line-height: 1.65; }
+    .text-area.short { min-height: 88px; }
+    .text-input:hover, .text-area:hover { border-color: #a9bbb1; }
+    .text-input:focus, .text-area:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(23, 107, 91, .12); }
+    .text-input[aria-invalid="true"], .text-area[aria-invalid="true"] { border-color: var(--danger); }
+    .field-error { margin: 0; color: var(--danger); font-size: 12px; }
+    .date-wrap { max-width: 280px; }
+    .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 4px; }
+    .button { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 0 18px; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; font-size: 14px; font-weight: 680; text-decoration: none; transition: background-color 180ms var(--ease-out), border-color 180ms var(--ease-out), transform 180ms var(--ease-out); }
+    .button:active:not(:disabled) { transform: translateY(1px); }
+    .button-primary { color: #fff; background: var(--accent); }
+    .button-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .button-secondary { border-color: var(--line-strong); background: #fff; color: var(--ink-soft); }
+    .button-secondary:hover:not(:disabled) { border-color: #9db1a6; background: #f8fbf9; }
+    .button-small { min-height: 38px; padding: 0 13px; font-size: 13px; }
+    .privacy-note { display: flex; align-items: flex-start; gap: 8px; margin: 18px 0 0; color: var(--ink-muted); font-size: 12px; line-height: 1.55; }
+    .privacy-note strong { color: var(--ink-soft); font-weight: 650; }
+    .preview-heading { align-items: center; margin-bottom: 20px; }
+    .preview-status { margin: 7px 0 0; color: var(--ink-muted); font-size: 12px; }
+    .preview-status[data-state="ready"] { color: var(--accent); }
+    .paper { min-height: 408px; display: flex; flex-direction: column; padding: clamp(20px, 3vw, 34px); border: 1px solid #e2e9e5; border-radius: var(--radius-md); background: #fff; box-shadow: 0 6px 18px rgba(31, 57, 47, .045); }
+    .paper-topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+    .paper-label { margin: 0; color: var(--ink-muted); font-size: 11px; font-weight: 720; letter-spacing: .12em; }
+    .paper-date { margin: 0; color: var(--ink-muted); font-size: 12px; }
+    .report-content { flex: 1 1 auto; min-height: 260px; margin: 22px 0 0; padding: 0; border: 0; outline: 0; color: var(--ink); background: transparent; font-family: inherit; font-size: 14px; line-height: 1.85; resize: vertical; white-space: pre-wrap; }
+    .report-content::placeholder { color: #7a8982; opacity: 1; }
+    .preview-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #edf1ee; }
+    .preview-hint { max-width: 34ch; margin: 0; color: var(--ink-muted); font-size: 12px; line-height: 1.55; }
+    .history-panel { margin-top: 28px; padding: clamp(24px, 3.2vw, 40px); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-panel); }
+    .history-heading { align-items: center; margin-bottom: 20px; }
+    .history-head-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .history-note { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 12px; font-weight: 640; }
+    .history-note .local-dot { box-shadow: none; }
+    .history-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+    .history-list[hidden], .history-empty[hidden], .history-note[hidden] { display: none; }
+    .history-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-soft); transition: border-color 180ms var(--ease-out), background-color 180ms var(--ease-out); }
+    .history-item:hover { border-color: var(--line-strong); }
+    .history-item[data-confirming="true"] { border-color: #e3b7b2; background: var(--danger-soft); }
+    .history-info { display: grid; gap: 4px; min-width: 0; }
+    .history-date { margin: 0; color: var(--ink); font-size: 15px; font-weight: 680; }
+    .history-meta { margin: 0; color: var(--ink-muted); font-size: 12px; }
+    .history-excerpt { margin: 3px 0 0; color: var(--ink-soft); font-size: 13px; line-height: 1.55; }
+    .history-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .button-danger { color: var(--danger); border-color: #e3b7b2; background: #fff; }
+    .button-danger:hover:not(:disabled) { border-color: var(--danger); background: var(--danger-soft); }
+    .button-danger-solid { color: #fff; background: var(--danger); }
+    .button-danger-solid:hover:not(:disabled) { background: #8f2f2f; }
+    .history-empty { margin: 0; padding: 28px 18px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); color: var(--ink-muted); background: var(--surface-soft); font-size: 13px; line-height: 1.65; text-align: center; }
+    .toast { position: fixed; right: 24px; bottom: 24px; z-index: 2; max-width: min(360px, calc(100vw - 32px)); padding: 12px 16px; border: 1px solid #bcd4c8; border-radius: var(--radius-sm); color: #184c3f; background: #f3fbf6; box-shadow: 0 8px 28px rgba(26, 58, 44, .13); font-size: 14px; opacity: 0; pointer-events: none; transform: translateY(8px); transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out); }
+    .toast[data-visible="true"] { opacity: 1; transform: translateY(0); }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    @media (hover: hover) {
+      .button-primary:hover:not(:disabled), .button-secondary:hover:not(:disabled) { transform: translateY(-1px); }
+    }
+    @media (max-width: 1024px) {
+      .header-inner, .page { width: min(100% - 48px, 800px); }
+      .workspace { grid-template-columns: minmax(0, 1fr); }
+      .preview-panel { border-top: 1px solid var(--line); border-left: 0; }
+      .form-panel, .preview-panel { padding: clamp(24px, 5vw, 40px); }
+      .paper { min-height: 360px; }
+    }
+    @media (max-width: 600px) {
+      .app-header { min-height: 64px; }
+      .header-inner, .page { width: calc(100% - 32px); }
+      .local-note { max-width: 142px; font-size: 11px; line-height: 1.35; }
+      .brand-context { display: none; }
+      .page { padding-top: 36px; padding-bottom: 40px; }
+      .page-intro { margin-bottom: 26px; }
+      .workspace { border-radius: var(--radius-md); }
+      .form-panel, .preview-panel { padding: 22px 18px; }
+      .panel-heading { margin-bottom: 22px; }
+      .form-stack { gap: 19px; }
+      .form-actions { align-items: stretch; }
+      .form-actions .button-primary { flex: 1 1 100%; }
+      .paper { min-height: 340px; padding: 20px 16px; }
+      .preview-footer { align-items: flex-start; flex-direction: column; }
+      .preview-footer .button { align-self: flex-start; }
+      .history-panel { margin-top: 20px; padding: 22px 18px; border-radius: var(--radius-md); }
+      .history-heading { flex-wrap: wrap; }
+      .history-item { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+      .history-actions { width: 100%; }
+      .history-actions .button { flex: 1 1 auto; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand" aria-label="日报工作台">
+        <span class="brand-mark" aria-hidden="true">记</span>
+        <div>
+          <div class="brand-name">日报工作台</div>
+          <span class="brand-context">Daily work, clearly told</span>
+        </div>
+      </div>
+      <div class="local-note"><span class="local-dot" aria-hidden="true"></span><span>内容在当前浏览器本地整理</span></div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="page-intro" aria-labelledby="page-title">
+      <p class="eyebrow">DAILY REPORT</p>
+      <h1 id="page-title">把一天的工作，整理清楚。</h1>
+      <p class="intro-copy">记下今天的进展与下一步计划，生成一份结构清晰、方便修改和分享的日报。</p>
+    </section>
+
+    <section class="workspace" aria-label="日报编辑工作区">
+      <section class="form-panel" aria-labelledby="form-title">
+        <div class="panel-heading">
+          <div>
+            <p class="panel-kicker">STEP 01 · 填写内容</p>
+            <h2 id="form-title">今天做了什么？</h2>
+          </div>
+          <span class="step-number" aria-hidden="true">01</span>
+        </div>
+        <form id="report-form" novalidate>
+          <div class="form-stack">
+            <div class="field date-wrap">
+              <label class="field-label" for="report-date">日报日期 <span class="required-mark" aria-hidden="true">*</span></label>
+              <input class="text-input" id="report-date" name="report-date" type="date" required>
+              <p class="field-error visually-hidden" id="date-error" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="today-work">今日完成 <span class="required-mark" aria-hidden="true">*</span></label>
+              <textarea class="text-area" id="today-work" name="today-work" required aria-describedby="today-help today-error" placeholder="写下完成的事项，每项另起一行"></textarea>
+              <p class="field-help" id="today-help">按事项分行填写，生成后也可以继续编辑。</p>
+              <p class="field-error visually-hidden" id="today-error" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="tomorrow-work">明日计划</label>
+              <textarea class="text-area short" id="tomorrow-work" name="tomorrow-work" aria-describedby="tomorrow-help" placeholder="例如：继续跟进需求，补充验收记录"></textarea>
+              <p class="field-help" id="tomorrow-help">让接下来的重点一目了然。</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="blockers">需要协助</label>
+              <textarea class="text-area short" id="blockers" name="blockers" aria-describedby="blockers-help" placeholder="没有待协调事项可留空"></textarea>
+              <p class="field-help" id="blockers-help">记录需要协调的事项；留空时日报会标为“未填写”。</p>
+            </div>
+            <div class="form-actions">
+              <button class="button button-primary" id="generate-button" type="submit">生成日报 <span aria-hidden="true">→</span></button>
+              <button class="button button-secondary" id="sample-button" type="button">填入示例</button>
+            </div>
+          </div>
+        </form>
+        <p class="privacy-note"><span class="local-dot" aria-hidden="true"></span><span><strong>本地整理</strong> · 当前页面不会上传你填写的内容。</span></p>
+      </section>
+
+      <section class="preview-panel" aria-labelledby="preview-title">
+        <div class="panel-heading preview-heading">
+          <div>
+            <p class="panel-kicker">STEP 02 · 预览与编辑</p>
+            <h2 id="preview-title">你的日报</h2>
+            <p class="preview-status" id="preview-status" data-state="empty" aria-live="polite">填写内容后，生成一份日报预览</p>
+          </div>
+          <span class="step-number" aria-hidden="true">02</span>
+        </div>
+        <div class="paper">
+          <div class="paper-topline">
+            <p class="paper-label">DAILY REPORT</p>
+            <p class="paper-date" id="paper-date">等待生成</p>
+          </div>
+          <label class="visually-hidden" for="report-output">可编辑的日报内容</label>
+          <textarea class="report-content" id="report-output" aria-describedby="output-help" placeholder="生成后，日报会显示在这里。你可以直接修改，再复制使用。"></textarea>
+          <div class="preview-footer">
+            <p class="preview-hint" id="output-help">生成内容可自由编辑。空白栏目会注明“未填写”，不会替你猜测。</p>
+            <button class="button button-secondary button-small" id="copy-button" type="button" disabled>复制日报</button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="history-panel" aria-labelledby="history-title">
+      <div class="panel-heading history-heading">
+        <div>
+          <p class="panel-kicker">STEP 03 · 历史记录</p>
+          <h2 id="history-title">本地日报历史</h2>
+          <p class="preview-status" id="history-status" data-state="empty" aria-live="polite">生成日报后会自动保存在这里</p>
+        </div>
+        <div class="history-head-tools">
+          <span class="history-note" id="history-note"><span class="local-dot" aria-hidden="true"></span>仅保存在本机浏览器</span>
+          <button class="button button-secondary button-small" id="clear-history" type="button" disabled>清空全部</button>
+        </div>
+      </div>
+      <p class="history-empty" id="history-empty">还没有历史记录。生成一篇日报后，它会保存在当前浏览器中，随时可以载入继续编辑。</p>
+      <ul class="history-list" id="history-list" hidden></ul>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" data-visible="false"></div>
+
+  <script>
+    (() => {
+      const form = document.getElementById("report-form");
+      const dateField = document.getElementById("report-date");
+      const todayField = document.getElementById("today-work");
+      const tomorrowField = document.getElementById("tomorrow-work");
+      const blockersField = document.getElementById("blockers");
+      const output = document.getElementById("report-output");
+      const generateButton = document.getElementById("generate-button");
+      const copyButton = document.getElementById("copy-button");
+      const status = document.getElementById("preview-status");
+      const paperDate = document.getElementById("paper-date");
+      const toast = document.getElementById("toast");
+      const historyList = document.getElementById("history-list");
+      const historyEmpty = document.getElementById("history-empty");
+      const historyStatus = document.getElementById("history-status");
+      const historyNote = document.getElementById("history-note");
+      const clearHistoryButton = document.getElementById("clear-history");
+      const HISTORY_KEY = "daily-report-workspace:history:v1";
+      const HISTORY_LIMIT = 50;
+      let storageAvailable = true;
+      let pendingDeleteId = null;
+      let awaitingClear = false;
+      let clearResetTimer;
+      let generated = false;
+      let toastTimer;
+
+      try {
+        const probeKey = HISTORY_KEY + ":probe";
+        window.localStorage.setItem(probeKey, "1");
+        window.localStorage.removeItem(probeKey);
+      } catch (error) {
+        storageAvailable = false;
+      }
+
+      const now = new Date();
+      const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+      dateField.value = localDate;
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.dataset.visible = "true";
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => { toast.dataset.visible = "false"; }, 2600);
+      }
+
+      function linesFrom(field) {
+        return field.value.split(/\n+/).map(item => item.trim()).filter(Boolean);
+      }
+
+      function displayLines(items) {
+        return items.length ? items.map(item => "• " + item) : ["• 未填写"];
+      }
+
+      function setError(field, message) {
+        const error = document.getElementById(field.id === "today-work" ? "today-error" : "date-error");
+        field.setAttribute("aria-invalid", message ? "true" : "false");
+        error.textContent = message;
+        error.classList.toggle("visually-hidden", !message);
+      }
+
+      function validateRequired() {
+        let firstInvalid = null;
+        if (!dateField.value) {
+          setError(dateField, "请选择日报日期。");
+          firstInvalid = dateField;
+        } else {
+          setError(dateField, "");
+        }
+        if (!todayField.value.trim()) {
+          setError(todayField, "请至少填写一项今日完成的工作，再生成日报。");
+          firstInvalid = firstInvalid || todayField;
+        } else {
+          setError(todayField, "");
+        }
+        if (firstInvalid) firstInvalid.focus();
+        return !firstInvalid;
+      }
+
+      function formatDate(value) {
+        const date = new Date(value + "T00:00:00");
+        return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long" }).format(date);
+      }
+
+      dateField.addEventListener("blur", () => {
+        if (dateField.value) setError(dateField, "");
+      });
+      todayField.addEventListener("blur", () => {
+        if (todayField.value.trim()) setError(todayField, "");
+      });
+      [dateField, todayField, tomorrowField, blockersField].forEach(field => {
+        field.addEventListener("input", () => {
+          if (!generated) return;
+          status.textContent = "填写内容已变化，重新生成可同步预览";
+          status.dataset.state = "empty";
+        });
+      });
+
+      form.addEventListener("submit", event => {
+        event.preventDefault();
+        if (!validateRequired()) return;
+        generateButton.disabled = true;
+        generateButton.textContent = "正在整理…";
+        window.setTimeout(() => {
+          const dateLabel = formatDate(dateField.value);
+          const report = [
+            dateLabel + " 工作日报",
+            "",
+            "今日完成",
+            ...displayLines(linesFrom(todayField)),
+            "",
+            "明日计划",
+            ...displayLines(linesFrom(tomorrowField)),
+            "",
+            "需要协助",
+            ...displayLines(linesFrom(blockersField))
+          ].join("\n");
+          output.value = report;
+          paperDate.textContent = dateLabel;
+          copyButton.disabled = false;
+          generated = true;
+          generateButton.disabled = false;
+          generateButton.innerHTML = "重新生成 <span aria-hidden=\"true\">→</span>";
+          const saved = saveReport(dateField.value, dateLabel, report);
+          status.textContent = saved ? "日报已生成，并已保存到本地历史" : "日报已生成，可直接编辑或复制";
+          status.dataset.state = "ready";
+          output.focus();
+        }, 180);
+      });
+
+      document.getElementById("sample-button").addEventListener("click", () => {
+        todayField.value = "整理本周需求反馈，合并重复问题并补充优先级说明。\n更新任务看板，标记已完成事项并同步剩余工作。";
+        tomorrowField.value = "继续跟进高优先级需求，补齐验收记录。";
+        blockersField.value = "暂无需要协助的事项。";
+        dateField.value = localDate;
+        setError(todayField, "");
+        setError(dateField, "");
+        todayField.focus();
+        showToast("示例内容已填入，可以按需修改");
+        if (generated) {
+          status.textContent = "填写内容已变化，重新生成可同步预览";
+          status.dataset.state = "empty";
+        }
+      });
+
+      copyButton.addEventListener("click", async () => {
+        if (!output.value.trim()) return;
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(output.value);
+          } else {
+            output.focus();
+            output.select();
+            const copied = document.execCommand("copy");
+            output.setSelectionRange(0, 0);
+            if (!copied) throw new Error("copy unavailable");
+          }
+          showToast("日报已复制，可以粘贴到需要的地方");
+        } catch (error) {
+          output.focus();
+          output.select();
+          showToast("自动复制未成功，日报已选中，请按 Ctrl+C 或 ⌘C 复制");
+        }
+      });
+
+      function formatSavedAt(timestamp) {
+        const value = Number(timestamp);
+        if (!value) return "未知时间";
+        return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+      }
+
+      function readHistory() {
+        if (!storageAvailable) return [];
+        try {
+          const raw = window.localStorage.getItem(HISTORY_KEY);
+          if (!raw) return [];
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return [];
+          return parsed.filter(record => record && typeof record.report === "string");
+        } catch (error) {
+          storageAvailable = false;
+          return [];
+        }
+      }
+
+      function writeHistory(items) {
+        if (!storageAvailable) return false;
+        try {
+          window.localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, HISTORY_LIMIT)));
+          return true;
+        } catch (error) {
+          storageAvailable = false;
+          return false;
+        }
+      }
+
+      function countLines(value) {
+        return String(value || "").split(/\n+/).map(item => item.trim()).filter(Boolean).length;
+      }
+
+      function summarize(record) {
+        const fields = record.fields || {};
+        const parts = [countLines(fields.today) + " 项完成"];
+        if (countLines(fields.tomorrow)) parts.push("含明日计划");
+        if (countLines(fields.blockers)) parts.push("有需协助");
+        return parts.join(" · ");
+      }
+
+      function makeButton(label, extraClass, handler) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "button button-small " + extraClass;
+        button.textContent = label;
+        button.addEventListener("click", handler);
+        return button;
+      }
+
+      function createHistoryItem(record) {
+        const item = document.createElement("li");
+        item.className = "history-item";
+        item.dataset.id = record.id;
+
+        const info = document.createElement("div");
+        info.className = "history-info";
+
+        const date = document.createElement("p");
+        date.className = "history-date";
+        date.textContent = record.dateLabel || record.date || "未标注日期";
+
+        const meta = document.createElement("p");
+        meta.className = "history-meta";
+        meta.textContent = summarize(record) + " · 保存于 " + formatSavedAt(record.savedAt);
+
+        const excerpt = document.createElement("p");
+        excerpt.className = "history-excerpt od-clamp-2";
+        excerpt.textContent = record.report.replace(/\s*\n+\s*/g, " ").trim();
+
+        info.append(date, meta, excerpt);
+        item.appendChild(info);
+
+        const actions = document.createElement("div");
+        actions.className = "history-actions";
+
+        if (pendingDeleteId === record.id) {
+          item.dataset.confirming = "true";
+          actions.append(
+            makeButton("确认删除", "button-danger-solid", () => removeRecord(record.id)),
+            makeButton("取消", "button-secondary", () => { pendingDeleteId = null; renderHistory(); })
+          );
+        } else {
+          actions.append(
+            makeButton("载入", "button-secondary", () => loadRecord(record)),
+            makeButton("复制", "button-secondary", () => copyRecord(record)),
+            makeButton("删除", "button-danger", () => { pendingDeleteId = record.id; renderHistory(); })
+          );
+        }
+        item.appendChild(actions);
+        return item;
+      }
+
+      function renderHistory() {
+        const items = readHistory();
+        historyList.innerHTML = "";
+        if (!storageAvailable) {
+          historyList.hidden = true;
+          historyEmpty.hidden = false;
+          historyEmpty.textContent = "本地存储不可用：可能处于隐私模式或存储空间已满。历史记录暂不可用，但生成与复制功能仍然正常。";
+          historyStatus.textContent = "本地存储不可用，历史记录暂不可用";
+          historyStatus.dataset.state = "empty";
+          clearHistoryButton.disabled = true;
+          historyNote.hidden = true;
+          return;
+        }
+        historyNote.hidden = false;
+        const hasItems = items.length > 0;
+        historyList.hidden = !hasItems;
+        historyEmpty.hidden = hasItems;
+        clearHistoryButton.disabled = !hasItems;
+        historyStatus.textContent = hasItems ? "已保存 " + items.length + " 篇日报，可载入继续编辑" : "生成日报后会自动保存在这里";
+        historyStatus.dataset.state = hasItems ? "ready" : "empty";
+        if (!hasItems) return;
+        items.forEach(record => historyList.appendChild(createHistoryItem(record)));
+      }
+
+      function removeRecord(id) {
+        const items = readHistory().filter(record => record.id !== id);
+        pendingDeleteId = null;
+        writeHistory(items);
+        renderHistory();
+        showToast("已删除这条历史日报");
+      }
+
+      function loadRecord(record) {
+        dateField.value = record.date || localDate;
+        todayField.value = (record.fields && record.fields.today) || "";
+        tomorrowField.value = (record.fields && record.fields.tomorrow) || "";
+        blockersField.value = (record.fields && record.fields.blockers) || "";
+        output.value = record.report || "";
+        paperDate.textContent = record.dateLabel || formatDate(dateField.value);
+        setError(dateField, "");
+        setError(todayField, "");
+        generated = true;
+        copyButton.disabled = false;
+        generateButton.innerHTML = "重新生成 <span aria-hidden=\"true\">→</span>";
+        status.textContent = "已载入历史日报，可继续编辑";
+        status.dataset.state = "ready";
+        pendingDeleteId = null;
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+        output.focus();
+        showToast("已载入 " + (record.dateLabel || "历史日报"));
+      }
+
+      async function writeClipboard(text) {
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return true;
+          }
+        } catch (error) {
+          /* fall through to the legacy path */
+        }
+        try {
+          const helper = document.createElement("textarea");
+          helper.value = text;
+          helper.setAttribute("readonly", "");
+          helper.style.position = "fixed";
+          helper.style.top = "-1000px";
+          document.body.appendChild(helper);
+          helper.select();
+          const copied = document.execCommand("copy");
+          document.body.removeChild(helper);
+          return copied;
+        } catch (error) {
+          return false;
+        }
+      }
+
+      async function copyRecord(record) {
+        const copied = await writeClipboard(record.report || "");
+        showToast(copied ? "这条日报已复制" : "复制未成功，请载入后手动复制");
+      }
+
+      function saveReport(dateValue, dateLabel, report) {
+        const record = {
+          id: "r-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+          date: dateValue,
+          dateLabel: dateLabel,
+          report: report,
+          fields: {
+            today: todayField.value,
+            tomorrow: tomorrowField.value,
+            blockers: blockersField.value
+          },
+          savedAt: Date.now()
+        };
+        const items = readHistory().filter(item => item.date !== dateValue);
+        items.unshift(record);
+        const stored = writeHistory(items);
+        renderHistory();
+        return stored;
+      }
+
+      function resetClearButton() {
+        awaitingClear = false;
+        window.clearTimeout(clearResetTimer);
+        clearHistoryButton.textContent = "清空全部";
+        clearHistoryButton.classList.remove("button-danger");
+      }
+
+      clearHistoryButton.addEventListener("click", () => {
+        if (clearHistoryButton.disabled) return;
+        if (!awaitingClear) {
+          awaitingClear = true;
+          clearHistoryButton.textContent = "确认清空？";
+          clearHistoryButton.classList.add("button-danger");
+          clearResetTimer = window.setTimeout(resetClearButton, 4000);
+          return;
+        }
+        writeHistory([]);
+        pendingDeleteId = null;
+        resetClearButton();
+        renderHistory();
+        showToast("历史记录已清空");
+      });
+
+      renderHistory();
+    })();
+  </script>
+</body>
+</html>

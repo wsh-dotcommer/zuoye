@@ -133,7 +133,7 @@ def test_detail_page_has_actions_and_payload(tmp_path: Path) -> None:
     assert "载入到工作台" in detail
     payload = detail.split('<script id="workbench-data"', 1)[1]
     assert '"2026-09-18"' in payload
-    assert "### 代码提交" in payload.replace("\\u003c", "<")
+    assert "### 工时统计" in payload.replace("\\u003c", "<")
 
 
 def test_detail_page_without_workbench_has_no_actions(tmp_path: Path) -> None:

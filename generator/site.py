@@ -19,7 +19,7 @@ from shared.storage import HistoryEntry
 
 # 索引页趋势区块（v2.3）：内联 SVG，不引图表库、不发请求
 TREND_LIMIT = 7
-TREND_MIN_POINTS = 2
+TREND_MIN_POINTS = 3  # v2.4：与 formatter.TREND_MIN_POINTS 同步，两期合计容易被误读
 TREND_BAR_WIDTH = 16
 TREND_GAP = 12
 TREND_HEIGHT = 96
@@ -74,6 +74,7 @@ def render_site(
             generated_at=view["generated_at"],
             interactive=site_config.workbench,
             trend=build_trend(history),
+            attribution=view.get("attribution", ""),
         ),
         encoding="utf-8",
     )

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>375px 移动端渲染校验</title>
+<style>
+  body { margin: 0; padding: 16px; background: #5c6b64; font: 13px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif; color: #fff; }
+  .row { display: flex; gap: 20px; align-items: flex-start; }
+  .col figcaption { margin-bottom: 6px; font-weight: 600; }
+  .frame { width: 375px; height: 812px; border: 0; background: #fff; border-radius: 10px; display: block; }
+  figcaption { margin: 0 0 6px; }
+</style>
+</head>
+<body>
+<div class="row">
+  <figure style="margin:0">
+    <figcaption>索引页 · 375px</figcaption>
+    <iframe class="frame" src="http://127.0.0.1:8770/index.html"></iframe>
+  </figure>
+  <figure style="margin:0">
+    <figcaption>日报详情页 · 375px</figcaption>
+    <iframe class="frame" src="http://127.0.0.1:8770/daily-report-2026-09-26.html"></iframe>
+  </figure>
+</div>
+</body>
+</html>

@@ -16,6 +16,9 @@ from shared.errors import CollectorError
 from shared.logger import JsonLineLogger, build_logger
 
 GITHUB_API = "https://api.github.com"
+FEISHU_API = "https://open.feishu.cn"
+
+TOKEN_PATH = "/open-apis/auth/v3/tenant_access_token/internal"
 
 
 class GitHubClient:
@@ -179,6 +182,127 @@ def parse_timestamp(value: str) -> datetime:
     if not value:
         raise CollectorError("缺少时间字段")
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+class FeishuClient:
+    """飞书开放平台客户端（v2.3，只读数据源用）。
+
+    与 `GitHubClient` 共用同一套超时重试策略，但认证方式不同：
+    先用 app_id/app_secret 换 `tenant_access_token`（单次运行取一次并缓存），
+    之后每个请求带 `Authorization: Bearer <token>`。
+    """
+
+    def __init__(
+        self,
+        app_id: str,
+        app_secret: str,
+        *,
+        base_url: str = FEISHU_API,
+        retry_times: int = 3,
+        retry_interval: float = 5.0,
+        timeout: float = 15.0,
+        transport: httpx.BaseTransport | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        logger: JsonLineLogger | None = None,
+    ) -> None:
+        self._client = httpx.Client(
+            base_url=base_url,
+            headers={"User-Agent": "daily-report/1.0"},
+            timeout=timeout,
+            transport=transport,
+        )
+        self._app_id = app_id
+        self._app_secret = app_secret
+        self._token = ""
+        self.retry_times = max(0, retry_times)
+        self.retry_interval = max(0.0, retry_interval)
+        self._sleep = sleep
+        self._logger = logger or build_logger(None)
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> FeishuClient:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    @property
+    def auth_configured(self) -> bool:
+        return bool(self._app_id and self._app_secret)
+
+    def tenant_access_token(self) -> str:
+        """换取（并缓存）tenant_access_token；失败抛 CollectorError。"""
+
+        if self._token:
+            return self._token
+        payload = self._request(
+            "POST",
+            TOKEN_PATH,
+            json={"app_id": self._app_id, "app_secret": self._app_secret},
+        )
+        token = str(payload.get("tenant_access_token") or "") if isinstance(payload, dict) else ""
+        if not token:
+            detail = payload.get("msg") if isinstance(payload, dict) else payload
+            raise CollectorError(f"飞书未返回 tenant_access_token: {detail}")
+        self._token = token
+        return token
+
+    def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """GET 并校验飞书业务返回码（`code != 0` 视为失败）。"""
+
+        payload = self._request(
+            "GET",
+            path,
+            params=params,
+            headers={"Authorization": f"Bearer {self.tenant_access_token()}"},
+        )
+        if isinstance(payload, dict):
+            code = payload.get("code")
+            if code not in (0, None):
+                raise CollectorError(f"飞书 API 错误 {code}: {payload.get('msg', '')} {path}")
+            return payload.get("data")
+        return payload
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                response = self._client.request(
+                    method, path, params=params, json=json, headers=headers
+                )
+            except httpx.HTTPError as exc:
+                self._retry_or_raise(attempt, path, f"请求异常 {type(exc).__name__}: {exc}")
+                continue
+
+            if response.status_code >= 500:
+                self._retry_or_raise(attempt, path, f"飞书服务端错误 {response.status_code}")
+                continue
+
+            if response.status_code >= 400:
+                snippet = response.text[:200].replace("\n", " ")
+                raise CollectorError(f"飞书 API {response.status_code}: {path} {snippet}")
+
+            try:
+                return response.json()
+            except ValueError as exc:
+                raise CollectorError(f"飞书返回内容不是合法 JSON: {path}") from exc
+
+    def _retry_or_raise(self, attempt: int, path: str, reason: str) -> None:
+        if attempt > self.retry_times:
+            raise CollectorError(f"{reason}（已重试 {self.retry_times} 次）: {path}")
+        self._logger.error("feishu_request_retry", path=path, attempt=attempt, reason=reason)
+        self._sleep(self.retry_interval)
 
 
 def to_github_time(moment: datetime) -> str:

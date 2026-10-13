@@ -105,7 +105,13 @@ def build_payload(
 
     content = report.markdown or "（日报内容为空）"
     if len(content) > MAX_MARKDOWN_LENGTH:
-        content = content[:MAX_MARKDOWN_LENGTH] + "\n…（内容过长已截断）"
+        # v2.4：数据来源标注是合规要求，不能因为超长截断就丢掉——先摘出标注，
+        # 截正文，再把标注重新拼回末尾。
+        body, attribution = _split_attribution(content, report.attribution)
+        budget = max(MAX_MARKDOWN_LENGTH - len(attribution) - 1, 0)
+        content = body[:budget] + "\n…（内容过长已截断）"
+        if attribution:
+            content += "\n\n" + attribution
     payload: dict[str, Any] = {
         "msg_type": "interactive",
         "card": {
@@ -120,6 +126,18 @@ def build_payload(
         },
     }
     return _sign(payload, secret, timestamp)
+
+
+def _split_attribution(markdown: str, attribution: str) -> tuple[str, str]:
+    """把结尾的「数据来源」标注与正文分开（末尾匹配不上时返回原文与空串）。"""
+
+    tail = (attribution or "").strip()
+    if not tail:
+        return markdown, ""
+    stripped = markdown.rstrip()
+    if not stripped.endswith(tail):
+        return markdown, ""
+    return stripped[: -len(tail)].rstrip(), tail
 
 
 def _sign(payload: dict[str, Any], secret: str, timestamp: int | None = None) -> dict[str, Any]:

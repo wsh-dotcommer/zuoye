@@ -1,37 +1,94 @@
 {% extends "base.html.j2" %}
 {% block content %}
-    <header class="header">
-      <h1>{{ view.title }}</h1>
-      <p class="meta">团队：{{ view.team_name }} · 生成时间：{{ view.generated_at }}</p>
+    <section class="page-intro">
+      <p class="eyebrow">Daily report</p>
+      <h1>{{ view.heading }}</h1>
+      <p class="intro-copy">日期：{{ view.date_label }} · 团队：{{ view.team_label }} · 生成时间：{{ view.generated_at }}</p>
 {% if view.hours_summary %}
-      <p class="meta">工时：团队合计 {{ view.hours_summary.total }}h · 人均 {{ view.hours_summary.average }}h（{{ view.hours_summary.note }}）</p>
+      <p class="intro-copy intro-hours">工时：团队合计 {{ view.hours_summary.total }}h · 人均 {{ view.hours_summary.average }}h（{{ view.hours_summary.note }}）</p>
 {% endif %}
-      <ul class="summary">
+      <ul class="chips">
 {% for source in view.source_summary %}
         <li class="{{ 'ok' if source.ok else 'failed' }}">{{ source.label }} {{ source.count }} 条{% if not source.ok %} · 数据获取失败{% endif %}</li>
 {% endfor %}
       </ul>
-    </header>
-{% for member in view.members %}
-    <section class="member">
-      <h2>{{ member.name }}<span class="username">（{{ member.github_username }}）</span></h2>
-{% for section in member.sections %}
-      <section class="block">
-        <h3>{{ section.title }}</h3>
-{% if section.state == "ok" %}
-        <ul>
-{% for item in section.lines %}
-          <li>{{ item[2:] if item.startswith("- ") else item }}</li>
+{% if view.extra_lines %}
+      <ul class="head-lines">
+{% for line in view.extra_lines %}
+        <li>{{ line }}</li>
 {% endfor %}
-        </ul>
+      </ul>
+{% endif %}
+    </section>
+{% if interactive %}
+    <div class="action-row">
+      <button class="button button-secondary" id="report-copy" type="button" data-date="{{ view.date }}">复制 Markdown</button>
+      <button class="button button-secondary" id="report-load" type="button">载入到工作台</button>
+    </div>
+{% endif %}
+{% for member in view.members %}
+    <section class="panel">
+{% if not view.single_member %}
+      <div class="panel-heading">
+        <div>
+          <p class="panel-kicker">Member · 成员日报</p>
+          <h2>{{ member.name }}<span class="username">@{{ member.github_username }}</span></h2>
+        </div>
+        <span class="avatar" aria-hidden="true">{{ member.name[:1] }}</span>
+      </div>
+{% endif %}
+{% for section in member.sections %}
+      <section class="block{% if section.sub %} block-sub{% endif %}">
+        <div class="block-head">
+{% if section.sub %}
+          <h4>{{ section.title }}</h4>
 {% else %}
-        <p class="{{ 'empty' if section.state == 'empty' else 'failed-note' }}">{{ section.note }}</p>
+          <h3>{{ section.title }}</h3>
+{% endif %}
+{% if section.state == "ok" and section.title != "工时统计" %}
+          <span class="block-meta">{{ section.lines|length }} 条</span>
+{% endif %}
+        </div>
+{% if section.state == "ok" %}
+        <ul class="lines">
+{% if section.entries %}
+{% for item in section.entries %}
+          <li class="line-entry">
+            <span class="line-main">{{ item.main | inline_links }}</span>
+{% if item.meta %}
+            <span class="line-meta">{{ item.meta | inline_links }}</span>
+{% endif %}
+          </li>
+{% endfor %}
+{% else %}
+{% for item in section.lines %}
+          <li>{{ (item[2:] if item.startswith("- ") else item) | inline_links }}</li>
+{% endfor %}
+{% endif %}
+        </ul>
+{% elif section.state == "empty" %}
+{% if section.merged %}
+        <p class="empty-line">{{ section.note }}</p>
+{% else %}
+        <p class="empty-box">{{ section.note }}</p>
+{% endif %}
+{% else %}
+        <p class="failed-box">{{ section.note }}</p>
 {% endif %}
       </section>
 {% endfor %}
     </section>
 {% endfor %}
+{% if view.attribution %}
+    <p class="attribution">{{ view.attribution }}</p>
+{% endif %}
 {% if back_link %}
-    <p class="back"><a href="index.html">← 返回日报列表</a></p>
+    <p class="back-link"><a class="button button-secondary" href="index.html">← 返回日报列表</a></p>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if interactive %}
+  <script id="workbench-data" type="application/json">{{ workbench_data|safe }}</script>
+  <script>{{ workbench_js|safe }}</script>
 {% endif %}
 {% endblock %}

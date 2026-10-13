@@ -3,13 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f6f4">
   <title>{{ page_title }}</title>
-  <style>{{ style }}</style>
+  <style>{{ style|safe }}</style>
 </head>
 <body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand" aria-label="{{ page_title.split('·')[0].strip() }}">
+        <span class="brand-mark" aria-hidden="true">日</span>
+        <div>
+          <div class="brand-name">{{ page_title.split('·')[0].strip() }}</div>
+          <span class="brand-context">由 GitHub 数据自动生成</span>
+        </div>
+      </div>
+      <div class="local-note"><span class="local-dot" aria-hidden="true"></span><span>只读快照 · {{ generated_at }}</span></div>
+    </div>
+  </header>
   <main class="page">
 {% block content %}{% endblock %}
     <footer class="footer">由智能日报生成器生成 · {{ generated_at }}</footer>
   </main>
+{% if interactive %}
+  <div class="toast" id="toast" role="status" aria-live="polite" data-visible="false"></div>
+{% endif %}
+{% block scripts %}{% endblock %}
 </body>
 </html>

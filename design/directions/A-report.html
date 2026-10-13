@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方向 A · 文档报表风</title>
+<style>
+  :root{
+    --paper:#fbfaf7; --ink:#231f1c; --muted:#6f6a62; --rule:#ddd7cb;
+    --stamp:#b23a2e; --add:#2f7d4f; --band:#f2efe8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:36px 16px 72px;background:#eae7e1;color:var(--ink);
+    font-family:"Microsoft YaHei","PingFang SC","Helvetica Neue",Arial,sans-serif;
+    line-height:1.8;font-size:14px}
+  .board{max-width:900px;margin:0 auto}
+  .screen-label{font-size:12px;letter-spacing:.16em;color:#8a857c;margin:0 0 10px;text-transform:uppercase}
+  .sheet{background:var(--paper);border:1px solid var(--rule);padding:46px 52px 38px;
+    box-shadow:0 10px 30px rgba(40,34,26,.07);margin-bottom:40px;position:relative}
+
+  /* 报头 */
+  .masthead{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;
+    border-bottom:2px solid var(--ink);padding-bottom:14px}
+  .team{font-size:13px;letter-spacing:.22em;color:var(--muted);margin:0 0 6px}
+  h1{margin:0;font-family:"Songti SC",SimSun,Georgia,serif;font-size:34px;line-height:1.25;letter-spacing:.01em}
+  .issue{text-align:right;font-size:12px;color:var(--muted);line-height:1.9;white-space:nowrap}
+  .issue b{display:block;font-size:20px;color:var(--ink);font-family:"Songti SC",SimSun,Georgia,serif}
+
+  /* 元信息表 */
+  .meta-table{width:100%;border-collapse:collapse;margin:22px 0 30px;font-size:13px}
+  .meta-table th{width:96px;text-align:left;font-weight:400;color:var(--muted);
+    padding:7px 0;border-bottom:1px solid var(--rule)}
+  .meta-table td{padding:7px 0;border-bottom:1px solid var(--rule)}
+  .meta-table tr:last-child th,.meta-table tr:last-child td{border-bottom:0}
+  .meta-table .num{font-variant-numeric:tabular-nums}
+
+  /* 章节 */
+  .section{margin-top:34px}
+  .section-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--ink);padding-bottom:7px}
+  .section-no{font-family:Georgia,serif;font-size:13px;color:var(--stamp);letter-spacing:.1em}
+  .section-head h2{margin:0;font-family:"Songti SC",SimSun,Georgia,serif;font-size:20px;font-weight:600}
+  .section-head .count{margin-left:auto;font-size:12px;color:var(--muted)}
+  .owner{margin:14px 0 6px;font-size:13px;color:var(--muted)}
+  .owner b{color:var(--ink);font-weight:600}
+
+  /* 提交表 */
+  table.commits{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
+  table.commits th{font-weight:400;color:var(--muted);text-align:left;padding:6px 0;
+    border-bottom:1px solid var(--rule);font-size:12px}
+  table.commits th.r,table.commits td.r{text-align:right;white-space:nowrap}
+  table.commits td{padding:9px 0;border-bottom:1px dotted var(--rule);vertical-align:top}
+  table.commits tr:last-child td{border-bottom:0}
+  .repo{font-family:Consolas,"Courier New",monospace;font-size:11.5px;color:var(--muted);
+    display:block;margin-bottom:1px}
+  .delta{font-family:Consolas,"Courier New",monospace;font-variant-numeric:tabular-nums}
+  .delta .a{color:var(--add)} .delta .d{color:var(--stamp)}
+  .files{font-size:11.5px;color:var(--muted)}
+
+  /* 工时条 */
+  .hours{display:flex;align-items:center;gap:14px;margin-top:14px}
+  .hours .value{font-family:Georgia,serif;font-size:26px;font-variant-numeric:tabular-nums}
+  .bar{flex:1;height:9px;background:var(--band);border:1px solid var(--rule);position:relative}
+  .bar span{position:absolute;inset:0 auto 0 0;background:var(--stamp);opacity:.72}
+  .hours .note{font-size:12px;color:var(--muted);white-space:nowrap}
+
+  /* 列表 */
+  ol.plain{margin:10px 0 0;padding-left:20px}
+  ol.plain li{padding:3px 0}
+  .quote{padding:10px 14px;border-left:3px solid var(--rule);background:var(--band);
+    font-size:13px;margin:10px 0}
+  .quote .who{color:var(--muted);font-size:12px}
+
+  /* 页脚 */
+  .sheet-foot{margin-top:38px;padding-top:12px;border-top:1px solid var(--rule);
+    display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)}
+
+  /* 索引页（目录风） */
+  .toc{width:100%;border-collapse:collapse;font-size:13px;margin-top:18px}
+  .toc th{text-align:left;font-weight:400;font-size:12px;color:var(--muted);
+    padding:6px 0;border-bottom:1px solid var(--ink)}
+  .toc td{padding:12px 0;border-bottom:1px solid var(--rule)}
+  .toc tr:last-child td{border-bottom:0}
+  .toc .date{font-family:Georgia,serif;font-size:17px;font-variant-numeric:tabular-nums}
+  .toc .link{color:var(--stamp);text-decoration:none;border-bottom:1px solid currentColor;font-size:12px}
+  .toc .rhs{text-align:right;color:var(--muted);font-size:12px;white-space:nowrap}
+
+  @media (max-width:640px){
+    body{padding:20px 10px 48px}
+    .sheet{padding:26px 20px 24px}
+    h1{font-size:24px}
+    .masthead{flex-direction:column;align-items:flex-start}
+    .issue{text-align:left}
+    table.commits th.r,table.commits td.r{display:none}
+    .delta{display:block;margin-top:2px}
+    .hours{flex-wrap:wrap}
+  }
+  @media print{
+    body{background:#fff;padding:0}
+    .board{max-width:none}
+    .screen-label{display:none}
+    .sheet{border:0;box-shadow:none;padding:0;margin:0 0 18mm}
+    .section{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="board">
+
+  <p class="screen-label">屏幕 1 / 日报详情页</p>
+  <article class="sheet">
+    <header class="masthead">
+      <div>
+        <p class="team">红豆的研发团队</p>
+        <h1>研发日报</h1>
+      </div>
+      <div class="issue">
+        <b>2026-09-26</b>
+        生成于 18:40 · 第 1 期
+      </div>
+    </header>
+
+    <table class="meta-table">
+      <tr><th>数据源</th><td>代码提交 <b class="num">10</b> 条 · 任务进展 <b class="num">2</b> 条 · 协作沟通 <b class="num">2</b> 条</td></tr>
+      <tr><th>团队工时</th><td>合计 <b class="num">2h</b> · 人均 <b class="num">2h</b>（按提交时间推导，非真实考勤）</td></tr>
+      <tr><th>参与成员</th><td>1 名</td></tr>
+    </table>
+
+    <section class="section">
+      <div class="section-head">
+        <span class="section-no">01</span>
+        <h2>代码提交</h2>
+        <span class="count">10 条</span>
+      </div>
+      <p class="owner">成员：<b>红豆</b>（wsh-dotcommer）</p>
+      <table class="commits">
+        <thead>
+          <tr><th>提交内容</th><th class="r">变更</th><th class="r">文件数</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="repo">wsh-dotcommer/zuoye</span>feat: SDD 复现智能日报生成器 v1.1（含工时统计与静态日报站）</td>
+            <td class="r delta"><span class="a">+6220</span> / <span class="d">-0</span></td>
+            <td class="r files">53</td>
+          </tr>
+          <tr>
+            <td><span class="repo">wsh-dotcommer/zuoye</span>chore: 同步本地改动</td>
+            <td class="r delta"><span class="a">+83</span> / <span class="d">-2</span></td>
+            <td class="r files">2</td>
+          </tr>
+          <tr>
+            <td><span class="repo">wsh-dotcommer/zuoye</span>Add files via upload</td>
+            <td class="r delta"><span class="a">+281</span> / <span class="d">-276</span></td>
+            <td class="r files">2</td>
+          </tr>
+          <tr>
+            <td><span class="repo">wsh-dotcommer/zuoye</span>Add files via upload</td>
+            <td class="r delta"><span class="a">+12</span> / <span class="d">-9</span></td>
+            <td class="r files">2</td>
+          </tr>
+          <tr>
+            <td><span class="repo">wsh-dotcommer/zuoye</span>Add files via upload</td>
+            <td class="r delta"><span class="a">+172</span> / <span class="d">-14</span></td>
+            <td class="r files">7</td>
+          </tr>
+          <tr>
+            <td><span class="repo">wsh-dotcommer/zuoye</span>Add files via upload</td>
+            <td class="r delta"><span class="a">+142</span> / <span class="d">-29</span></td>
+            <td class="r files">1</td>
+          </tr>
+          <tr>
+            <td><span class="repo">wsh-dotcommer/zuoye</span>Add files via upload</td>
+            <td class="r delta"><span class="a">+48</span> / <span class="d">-3</span></td>
+            <td class="r files">1</td>
+          </tr>
+          <tr>
+            <td><span class="repo">wsh-dotcommer/zuoye</span>Add files via upload</td>
+            <td class="r delta"><span class="a">+79</span> / <span class="d">-11</span></td>
+            <td class="r files">3</td>
+          </tr>
+          <tr>
+            <td><span class="repo">wsh-dotcommer/zuoye</span>Add files via upload</td>
+            <td class="r delta"><span class="a">+185</span> / <span class="d">-0</span></td>
+            <td class="r files">2</td>
+          </tr>
+          <tr>
+            <td><span class="repo">wsh-dotcommer/zuoye</span>Add files via upload</td>
+            <td class="r delta"><span class="a">+7</span> / <span class="d">-6</span></td>
+            <td class="r files">2</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <span class="section-no">02</span>
+        <h2>任务进展</h2>
+        <span class="count">2 条</span>
+      </div>
+      <ol class="plain">
+        <li><b>test</b>：新建 → 进行中</li>
+        <li><b>text2</b>：新建 → 进行中</li>
+      </ol>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <span class="section-no">03</span>
+        <h2>工时统计</h2>
+        <span class="count">口径：提交时间推导</span>
+      </div>
+      <div class="hours">
+        <span class="value">2h</span>
+        <span class="bar"><span style="width:33%"></span></span>
+        <span class="note">10 条提交 · 2 个工作段 · 单日上限 12h</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <span class="section-no">04</span>
+        <h2>协作沟通</h2>
+        <span class="count">2 条</span>
+      </div>
+      <div class="quote">
+        <div class="who">wsh-dotcommer/zuoye #1 · wsh-dotcommer</div>
+        测试一下懂得都懂
+      </div>
+      <div class="quote">
+        <div class="who">wsh-dotcommer/zuoye #2 · wsh-dotcommer</div>
+        hhhhh
+      </div>
+    </section>
+
+    <div class="sheet-foot">
+      <span>智能日报生成器 · 红豆的研发团队</span>
+      <span>第 1 页 / 共 1 页</span>
+    </div>
+  </article>
+
+  <p class="screen-label">屏幕 2 / 索引页</p>
+  <article class="sheet">
+    <header class="masthead">
+      <div>
+        <p class="team">红豆的研发团队</p>
+        <h1>日报存档</h1>
+      </div>
+      <div class="issue">共 <b>2</b> 期</div>
+    </header>
+    <table class="toc">
+      <thead><tr><th>日期</th><th>摘要</th><th class="rhs">生成时间</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="date">2026-09-26</td>
+          <td>1 名成员 · 提交 10 · 任务 2 · 工时 2h　<a class="link" href="#">查看</a></td>
+          <td class="rhs">18:40</td>
+        </tr>
+        <tr>
+          <td class="date">2026-09-25</td>
+          <td>1 名成员 · 提交 3 · 任务 2 · 工时 1.5h　<a class="link" href="#">查看</a></td>
+          <td class="rhs">15:05</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="sheet-foot">
+      <span>由智能日报生成器生成</span>
+      <span>2026-09-26 18:40</span>
+    </div>
+  </article>
+
+</div>
+</body>
+</html>
