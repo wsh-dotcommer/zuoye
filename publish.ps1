@@ -33,6 +33,26 @@ function Info($text) { Write-Host $text -ForegroundColor Cyan }
 function Ok($text) { Write-Host $text -ForegroundColor Green }
 function Warn($text) { Write-Host $text -ForegroundColor Yellow }
 
+# 快速探测本机代理端口（git 不读系统代理，直连 github.com 时常被重置）
+function Test-PortOpen([int]$Port) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $task = $client.ConnectAsync('127.0.0.1', $Port)
+        return ($task.Wait(300) -and $client.Connected)
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
+}
+
+function Find-LocalProxy {
+    foreach ($port in 7897, 7890, 10809, 1080, 8889) {
+        if (Test-PortOpen $port) { return "http://127.0.0.1:$port" }
+    }
+    return ""
+}
+
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Warn "[错误] 未检测到 git，请先安装 Git for Windows。"
     exit 1
@@ -101,6 +121,15 @@ if ($LASTEXITCODE -eq 0) {
 
 Info "[4/5] 推送到 $Remote（首次会弹出 GitHub 登录）"
 git push -u origin $Branch
+if ($LASTEXITCODE -ne 0) {
+    # v2.5.3：直连失败（Connection was reset / SSL 报错）时，自动探测本机代理并重试一次
+    $localProxy = Find-LocalProxy
+    if ($localProxy) {
+        Warn "    直连失败，检测到本机代理 $localProxy，用它重试一次…"
+        git -c http.proxy=$localProxy -c https.proxy=$localProxy push -u origin $Branch
+        if ($LASTEXITCODE -eq 0) { Ok "    走代理推送成功（以后直连再失败会自动这样重试）" }
+    }
+}
 if ($LASTEXITCODE -ne 0) {
     Warn "[失败] 推送未成功。请按报错内容对照下面两类原因："
     Warn "  A. 报错含 'Could not connect' / 'Failed to connect' —— 网络连不上 github.com"
