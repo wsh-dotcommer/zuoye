@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from shared.errors import CollectorError
+from shared.feishu_oauth import UserTokenProvider
 from shared.logger import JsonLineLogger, build_logger
 
 GITHUB_API = "https://api.github.com"
@@ -190,6 +191,10 @@ class FeishuClient:
     与 `GitHubClient` 共用同一套超时重试策略，但认证方式不同：
     先用 app_id/app_secret 换 `tenant_access_token`（单次运行取一次并缓存），
     之后每个请求带 `Authorization: Bearer <token>`。
+
+    v2.5 起支持「用户身份」：传入 `user_token_provider` 后，`as_user=True`
+    的请求用 `user_access_token`（读「我负责的」任务必须走这条，见
+    `shared/feishu_oauth.py` 的说明）。
     """
 
     def __init__(
@@ -204,6 +209,7 @@ class FeishuClient:
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
         logger: JsonLineLogger | None = None,
+        user_token_provider: UserTokenProvider | None = None,
     ) -> None:
         self._client = httpx.Client(
             base_url=base_url,
@@ -218,6 +224,7 @@ class FeishuClient:
         self.retry_interval = max(0.0, retry_interval)
         self._sleep = sleep
         self._logger = logger or build_logger(None)
+        self._user_tokens = user_token_provider
 
     def close(self) -> None:
         self._client.close()
@@ -249,14 +256,35 @@ class FeishuClient:
         self._token = token
         return token
 
-    def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    @property
+    def user_token_configured(self) -> bool:
+        """是否已配置用户令牌提供者且本地确实有过授权。"""
+
+        return self._user_tokens is not None and self._user_tokens.has_token
+
+    def access_token(self, *, as_user: bool = False) -> str:
+        """按身份取令牌：用户身份读个人数据，应用身份读应用可见范围。"""
+
+        if not as_user:
+            return self.tenant_access_token()
+        if self._user_tokens is None:
+            raise CollectorError("本次调用要求用户身份，但没有配置用户令牌提供者")
+        return self._user_tokens.access_token()
+
+    def get_json(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        as_user: bool = False,
+    ) -> Any:
         """GET 并校验飞书业务返回码（`code != 0` 视为失败）。"""
 
         payload = self._request(
             "GET",
             path,
             params=params,
-            headers={"Authorization": f"Bearer {self.tenant_access_token()}"},
+            headers={"Authorization": f"Bearer {self.access_token(as_user=as_user)}"},
         )
         if isinstance(payload, dict):
             code = payload.get("code")

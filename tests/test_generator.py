@@ -443,7 +443,8 @@ def test_feishu_task_section_empty_state() -> None:
     markdown = _task_report(tasks=[]).markdown
 
     assert "### 任务进展 · 飞书任务" in markdown
-    assert "飞书工作台暂无任务" in markdown
+    # v2.5.2：既要覆盖"本来就没任务"，也要覆盖"更早完成的都被隐藏了"
+    assert "今日无飞书任务" in markdown
 
 
 def test_feishu_task_section_marks_backfill_and_truncates() -> None:

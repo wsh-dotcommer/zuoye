@@ -87,12 +87,17 @@ class FeishuTaskConfig:
 
     `scope` 为 `all` 时拉取应用可见的全部任务；为 `tasklist` 时只拉
     `tasklist_guids` 里的清单（工作台任务不在默认可见范围内时用这个）。
+
+    v2.5 起支持用户身份：`use_user_token` 为真且本地已有授权令牌时，改用
+    `user_access_token` 读「我负责的」个人任务（应用身份读不到个人任务）。
     """
 
     enabled: bool = False
     scope: str = "all"
     tasklist_guids: tuple[str, ...] = ()
     max_tasks: int = 200
+    use_user_token: bool = True
+    user_token_file: str = "data/feishu-user-token.json"
 
 
 @dataclass(frozen=True)
@@ -483,6 +488,11 @@ def _parse_feishu_tasks(value: Any) -> FeishuTaskConfig:
         scope=raw_scope,
         tasklist_guids=tasklist_guids,
         max_tasks=int(value.get("max_tasks", 200)),
+        use_user_token=bool(value.get("use_user_token", True)),
+        user_token_file=str(
+            value.get("user_token_file", "data/feishu-user-token.json")
+        ).strip()
+        or "data/feishu-user-token.json",
     )
     if config.max_tasks <= 0:
         raise ConfigError("sources.feishu.tasks.max_tasks 必须大于 0")

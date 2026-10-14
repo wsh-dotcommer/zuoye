@@ -18,6 +18,9 @@
 | v2.3.1 | 实现细节变更（起点为代码，逆向回溯更新本文件） | §4.2 补日报标题口径：由 `智能日报 · 日期` 改为 `<团队名> 智能日报 · 日期`（姓名取配置的 `team.name`，不写死）。邮件主题与飞书卡片标题不受影响，需求边界未变，故 `proposal.md` 与 `tasks.md` 不升版 |
 | v2.4 | 需求变更（由 proposal.md v2.4 传导） | ①新增飞书任务采集器 `collector/feishu_task.py` 与三态映射（§2/§3/§4.1）；②新增 `FeishuTaskRecord`、`DataSourceRef` 与 `DailyReport.feishu_tasks/attribution`（§3）；③§4.2 新增「数据来源」标注口径、飞书任务子小节口径、标题分级与空板块合并规则；④§4.3 索引页接收 `attribution`、趋势门槛 2 → 3；⑤新增 ADR-010 与 §6.8 溯源约束。存储层、推送层契约与配置文件格式之外的行为均不变 |
 | v2.4.1 | 实现细节变更（起点为代码，逆向回溯更新本文件） | §4.4 补邮件主题口径：新增配置 `notify.email.subject_prefix`，非空时主题由 `[团队名] 日期 智能日报` 改为 `<前缀> <团队名> <日期> 智能日报`（例：`研一 王帅豪 2026-10-13 智能日报`，前缀内多余空白自动归一），留空时行为与 v1.0 完全一致。展示文案调整、需求边界未变，故 `proposal.md` 与 `tasks.md` 不升版 |
+| v2.5 | 缺陷修复（起点为代码，逆向回溯更新本文件） | 飞书任务读不到数据：飞书任务接口区分身份，应用身份（`tenant_access_token`）读「我负责的」任务时「我」指应用自己，因此永远是空。新增 `shared/feishu_oauth.py`（授权链接、授权码换令牌、refresh_token 续期、本地令牌文件）与一次性脚本 `authorize-feishu.py`，采集器在有用户令牌时改用 `user_access_token` 并同时查询 v1「我负责的」列表（§4.1）；`FeishuClient` 增加 `as_user` 维度的认证（§2）。需求边界未变，故 `proposal.md` 与 `tasks.md` 不升版 |
+| v2.5.1 | 缺陷修复（起点为代码，逆向回溯更新本文件） | 授权卡在"浏览器回调到本机端口"这一环：`authorize-feishu.py` 新增 `--manual`（不启动本地服务器，把地址栏整条链接或裸授权码粘回终端，由 `shared/feishu_oauth.parse_callback_input()` 解析）、等待期每 10 秒心跳提示、失败时用 `hint_for_authorize_error()` 把错误翻译成"下一步做什么"，并把令牌文件路径打印为绝对路径。默认模式行为不变，故 `proposal.md` 与 `tasks.md` 不升版 |
+| v2.5.2 | 需求澄清（起点为代码，逆向回溯更新本文件） | 飞书任务小节从"全量快照"收紧为"当天仍有意义"：新增 `FeishuTaskRecord.completed_at`，采集层在映射后隐藏"状态=已完成且完成时间早于采集窗口起点"的记录（窗口起点即日报目标日 00:00，补跑按那天算；`start` 为空或任务缺完成时间时不过滤），并记 `feishu_tasks_filtered` 日志；小节为空时文案改为「今日无飞书任务」。展示口径调整，故 `proposal.md` 与 `tasks.md` 不升版 |
 
 ## 1. 系统架构
 
@@ -236,6 +239,9 @@ collect(config: Config, start: datetime, end: datetime) -> list[CommitRecord | T
 - 飞书任务三态映射（v2.4）：`completed_at` 非空且不为 `0` → 已完成；未完成且 `start.timestamp` 在**未来** → 未开始；其余未完成 → 进行中。飞书未返回 `start` 字段时退化为"未完成即进行中"，该退化路径在本节记录为已知口径（真实字段以权限到位后的只读探测结果为准）。
 - 飞书任务只读边界（v2.4）：只映射 `guid/summary/completed_at/start/due/updated_at` 六个字段，`description` 就地丢弃；不做任何写操作（不新建、不修改、不完成、不删除任务）。
 - 权限错误翻译（v2.4）：飞书返回 `99991672`（缺少 action scope）时，采集器把原始报文替换为可执行提示——"请在开发者后台为该应用添加 `task:task:read` 与 `task:tasklist:read` 权限并重新发布版本"——避免把一整段英文报文塞进日报（见 §6.1）。
+- 用户身份（v2.5）：飞书任务接口区分身份，`tenant_access_token` 下的"我负责的"指的是**应用自己**，因此应用身份读不到个人工作台任务。采集器在 `sources.feishu.tasks.use_user_token` 为真**且本地已有授权令牌**时，改用 `user_access_token` 调 `GET /open-apis/task/v2/tasks` 与 `GET /open-apis/task/v1/tasks?type=my_tasks`，按 `guid`/`id` 去重合并（两个任务空间的任务可能只出现在一边）；没有令牌时自动退回应用身份，行为与 v2.4 一致。v1 的任务对象没有开始时间字段，因此 v1 来源的任务只会出现「已完成 / 进行中」两态。
+- 时间戳兼容（v2.5）：飞书 v2 的时间字段是秒级、v1 是毫秒级，`due` 对象的键名也分别是 `timestamp` 与 `time`；`_to_moment()` 按数值位数（≥10^12 视为毫秒）与两种键名统一解析。
+- 展示口径（v2.5.2）：`_hide_old_completed()` 在映射后隐藏"状态 = 已完成 且 `completed_at` 早于采集窗口起点"的记录——留未完成的全部（进行中 / 未开始 / 逾期未完成）与**基准之后完成**的。基准取 `collect()` 的 `start`（普通运行 = 日报目标日 00:00，补跑历史日期 = 那天 00:00）；`start` 为空或已完成任务缺 `completed_at` 时不过滤（fail-open）。过滤在采集层完成，因此 `SourceStatus.count`（数据源徽章）与小节条数一致；隐藏条数记入 `feishu_tasks_filtered` 日志。小节为空时的文案是「今日无飞书任务」，同时覆盖"本来就没任务"与"更早完成的都被隐藏了"。
 - 任务进展只统计**真正的 Issue**：GitHub 的 `issues` 端点会同时返回 Pull Request（带 `pull_request` 字段），采集器显式跳过它们，避免与"代码提交"板块重复计数；PR 的产出通过提交与评审评论体现。
 - 去重口径：同一个 Issue 在**同一次运行**里只保留窗口内**最后一次**状态变更（例如"上午新建、下午关闭"只会输出「进行中 → 已完成」），避免同一条任务在日报里刷屏；若希望两次变更分别出现，请分两次运行。
 
@@ -572,6 +578,7 @@ check(target: LarkBotTarget) -> tuple[bool, str]      # v1.2
 3. **不改推送通道**：群消息读取走只读的企业自建应用（`tenant_access_token`），推送仍走群自定义机器人 Webhook；两者的凭据分别放在 `FEISHU_APP_ID/FEISHU_APP_SECRET` 与 `LARK_BOT_WEBHOOK/LARK_BOT_SECRET`，互不复用。
 4. **默认关闭**：`sources.feishu.enabled` 默认 `false`；未启用时采集计划里没有这一项，日报与站点与 v2.2 完全一致。
 5. **公开页面约束**：`docs/` 发布后是公开页面，因此飞书相关的展示只允许出现群名与计数，任何情况下都不允许把消息正文写进页面。
+6. **用户令牌的存放（v2.5）**：`user_access_token` / `refresh_token` 只落在本地文件 `data/feishu-user-token.json`（`data/` 已在 `.gitignore` 中），不进版本库、不写日志、不写日报产物；`authorize-feishu.py` 的回调处理器也不把回调参数打进终端。
 
 ### 6.7 存储迁移（v2.3 新增）
 

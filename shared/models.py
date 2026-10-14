@@ -154,6 +154,7 @@ class FeishuTaskRecord:
     summary: str
     status: str = STATUS_IN_PROGRESS
     due: date | None = None
+    completed_at: datetime | None = None
     updated_at: datetime | None = None
     url: str = ""
 

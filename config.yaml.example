@@ -53,6 +53,8 @@ sources:
       scope: all                     # all = 应用可见的全部任务；tasklist = 只同步下面列出的清单
       tasklist_guids: []             # scope: tasklist 时必填，如 [f8b3...：任务清单 URL 里的 guid]
       max_tasks: 200                 # 单次同步的任务数上限，超出部分不展示
+      use_user_token: true           # v2.5：用「用户身份」读个人「我负责的」任务；需先跑一次 authorize-feishu.py
+      user_token_file: data/feishu-user-token.json   # 用户令牌落盘位置（data/ 已在 .gitignore）
 
 report:
   output_dir: output                 # Markdown / HTML 日报输出目录

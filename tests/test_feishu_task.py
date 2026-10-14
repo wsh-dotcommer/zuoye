@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 import pytest
 
-from collector import feishu_message, feishu_task
+from collector import feishu_task
+from shared.feishu_oauth import UserToken, UserTokenStore, UserTokenProvider
+from shared.http import FeishuClient
 from shared.config import FeishuSourceConfig, FeishuTaskConfig
 from shared.errors import CollectorError
 from shared.http import TOKEN_PATH
-from shared.models import STATUS_DONE, STATUS_IN_PROGRESS, STATUS_NOT_STARTED
+from shared.models import STATUS_DONE, STATUS_IN_PROGRESS, STATUS_NOT_STARTED, FeishuTaskRecord
 from tests.conftest import json_response
 
 TASKS_PATH = "/open-apis/task/v2/tasks"
@@ -113,10 +117,12 @@ def _handler(
 
 
 def _patch(monkeypatch: pytest.MonkeyPatch, handler) -> None:
+    """注入 Mock 客户端；未配用户令牌提供者 → 走应用身份，行为与 v2.4 一致。"""
+
     monkeypatch.setattr(
-        feishu_message,
+        feishu_task,
         "build_client",
-        lambda _config: feishu_message.FeishuClient(
+        lambda _config: FeishuClient(
             "cli_demo",
             "app-secret",
             transport=httpx.MockTransport(handler),
@@ -256,3 +262,222 @@ def test_items_missing_guid_are_dropped(task_config, monkeypatch) -> None:
 
 def _task_list() -> list[dict]:
     return [_task("t-done", "唯一有效的一条", completed_at=PAST)]
+
+
+# ===== v2.5：用户身份（user_access_token） =====
+
+
+def _with_user_token(config, tmp_path: Path):
+    """把配置指向临时的令牌文件，并预置一个有效期还很长的用户令牌。"""
+
+    token_file = tmp_path / "feishu-user-token.json"
+    UserTokenStore(token_file).save(
+        UserToken(
+            access_token="u-user-token",
+            refresh_token="ur-1",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+    )
+    return replace(
+        config,
+        sources=replace(
+            config.sources,
+            feishu=replace(
+                config.sources.feishu,
+                tasks=replace(config.sources.feishu.tasks, user_token_file=str(token_file)),
+            ),
+        ),
+    )
+
+
+def _patch_with_user(monkeypatch: pytest.MonkeyPatch, handler, config) -> None:
+    """注入带用户令牌提供者的客户端（令牌有效，不会去换 token）。"""
+
+    provider = UserTokenProvider(
+        "cli_demo",
+        "app-secret",
+        UserTokenStore(config.sources.feishu.tasks.user_token_file),
+    )
+    monkeypatch.setattr(
+        feishu_task,
+        "build_client",
+        lambda _config: FeishuClient(
+            "cli_demo",
+            "app-secret",
+            transport=httpx.MockTransport(handler),
+            sleep=lambda _seconds: None,
+            user_token_provider=provider,
+        ),
+    )
+
+
+def test_user_identity_reads_my_tasks_and_merges_with_v2(task_config, tmp_path, monkeypatch) -> None:
+    """配了用户令牌后：v2 与 v1「我负责的」都查，按 guid 去重合并。"""
+
+    seen: list[tuple[str, str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        seen.append(
+            (
+                request.url.path,
+                request.headers.get("Authorization", ""),
+                params.get("type", ""),
+            )
+        )
+        if request.url.path == "/open-apis/task/v2/tasks":
+            return json_response(
+                {"code": 0, "data": {"items": [_task("t-v2", "v2 里的任务")], "has_more": False}}
+            )
+        if request.url.path == "/open-apis/task/v1/tasks":
+            # v1 形态：guid 是 id，完成时间字段叫 complete_time
+            return json_response(
+                {
+                    "code": 0,
+                    "data": {
+                        "items": [
+                            {"id": "t-v1", "summary": "v1 里的任务", "complete_time": ""},
+                            {"id": "t-v2", "summary": "重复的一条", "complete_time": ""},
+                        ],
+                        "has_more": False,
+                    },
+                }
+            )
+        return httpx.Response(404, json={"code": 1, "msg": "not found"})
+
+    user_config = _with_user_token(task_config, tmp_path)
+    _patch_with_user(monkeypatch, handler, user_config)
+
+    tasks = feishu_task.collect(user_config)
+
+    assert {item.guid for item in tasks} == {"t-v2", "t-v1"}  # 重复的 t-v2 被去掉
+    assert all(auth == "Bearer u-user-token" for _, auth, _ in seen)  # 全程用用户身份
+    assert ("/open-apis/task/v1/tasks", "Bearer u-user-token", "my_tasks") in seen
+
+
+def test_user_identity_maps_v1_complete_time_to_done(task_config, tmp_path, monkeypatch) -> None:
+    """v1 的 complete_time 非空 → 已完成；v1 没有开始时间，不会出现「未开始」。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/open-apis/task/v1/tasks":
+            return json_response(
+                {
+                    "code": 0,
+                    "data": {
+                        "items": [
+                            {"id": "t-done", "summary": "做完的", "complete_time": str(PAST)},
+                            {"id": "t-open", "summary": "没做完的", "complete_time": ""},
+                        ],
+                        "has_more": False,
+                    },
+                }
+            )
+        return json_response({"code": 0, "data": {"items": [], "has_more": False}})
+
+    user_config = _with_user_token(task_config, tmp_path)
+    _patch_with_user(monkeypatch, handler, user_config)
+
+    by_guid = {item.guid: item for item in feishu_task.collect(user_config)}
+
+    assert by_guid["t-done"].status == STATUS_DONE
+    assert by_guid["t-open"].status == STATUS_IN_PROGRESS
+
+
+# ===== v2.5.2：隐藏「基准时间之前完成」的任务 =====
+
+CST = timezone(timedelta(hours=8))
+BASELINE = datetime(2026, 10, 14, 0, 0, tzinfo=CST)  # 日报目标日 00:00
+WINDOW_END = datetime(2026, 10, 14, 18, 0, tzinfo=CST)
+
+
+def _seconds(moment: datetime) -> int:
+    return int(moment.timestamp())
+
+
+def test_collect_hides_tasks_completed_before_baseline(task_config, monkeypatch) -> None:
+    items = [
+        _task("t-old", "昨天完成的", completed_at=_seconds(datetime(2026, 10, 13, 10, 0, tzinfo=CST))),
+        _task("t-today", "今天完成的", completed_at=_seconds(datetime(2026, 10, 14, 10, 0, tzinfo=CST))),
+        _task("t-doing", "进行中的"),
+        _task("t-todo", "还没开始的", start=_seconds(datetime(2026, 10, 20, 9, 0, tzinfo=CST))),
+    ]
+    _patch(monkeypatch, _handler([], page_size=50, tasks=items))
+
+    tasks = feishu_task.collect(task_config, BASELINE, WINDOW_END)
+
+    # 未完成的（进行中/未开始）全留；已完成只留"当天完成"的
+    assert {item.guid for item in tasks} == {"t-today", "t-doing", "t-todo"}
+
+
+def test_completed_exactly_at_baseline_is_kept(task_config, monkeypatch) -> None:
+    """边界：完成时间正好等于基准（00:00:00）时保留，按 >= 处理。"""
+
+    _patch(monkeypatch, _handler([], page_size=50, tasks=[_task("t-edge", "卡在零点整", completed_at=_seconds(BASELINE))]))
+
+    assert [item.guid for item in feishu_task.collect(task_config, BASELINE, WINDOW_END)] == ["t-edge"]
+
+
+def test_collect_without_window_keeps_everything(task_config, monkeypatch) -> None:
+    """没传采集窗口时不过滤——fail-open，行为与 v2.4 一致。"""
+
+    items = [_task("t-old", "很久以前完成的", completed_at=_seconds(datetime(2020, 5, 21, tzinfo=CST)))]
+    _patch(monkeypatch, _handler([], page_size=50, tasks=items))
+
+    assert [item.guid for item in feishu_task.collect(task_config)] == ["t-old"]
+
+
+def test_hide_old_completed_keeps_done_without_timestamp() -> None:
+    """已完成但缺完成时间：宁可多显示也不误伤。"""
+
+    record = FeishuTaskRecord(guid="t-nostamp", summary="缺完成时间", status=STATUS_DONE)
+
+    assert feishu_task._hide_old_completed([record], BASELINE) == [record]
+    assert feishu_task._hide_old_completed([record], None) == [record]
+
+
+def test_backfill_uses_that_day_as_baseline(task_config, monkeypatch) -> None:
+    """补跑历史日期时基准跟着那天走：11 号完成的任务在 11 号那期里要出现。"""
+
+    items = [
+        _task("t-11", "11 号完成的", completed_at=_seconds(datetime(2026, 10, 11, 20, 0, tzinfo=CST))),
+        _task("t-10", "10 号完成的", completed_at=_seconds(datetime(2026, 10, 10, 20, 0, tzinfo=CST))),
+    ]
+    _patch(monkeypatch, _handler([], page_size=50, tasks=items))
+
+    backfilled = feishu_task.collect(
+        task_config,
+        datetime(2026, 10, 11, 0, 0, tzinfo=CST),
+        datetime(2026, 10, 12, 0, 0, tzinfo=CST),
+    )
+
+    assert [item.guid for item in backfilled] == ["t-11"]
+
+
+def test_no_user_token_falls_back_to_app_identity(task_config, monkeypatch) -> None:
+    """本地还没授权时，不会去调 v1「我负责的」，行为与 v2.4 一致。"""
+
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path == TOKEN_PATH:
+            return json_response({"code": 0, "tenant_access_token": "t-tenant"})
+        return json_response({"code": 0, "data": {"items": [], "has_more": False}})
+
+    provider = UserTokenProvider(
+        "cli_demo", "app-secret", UserTokenStore(Path("data/definitely-missing-token.json"))
+    )
+    monkeypatch.setattr(
+        feishu_task,
+        "build_client",
+        lambda _config: FeishuClient(
+            "cli_demo",
+            "app-secret",
+            transport=httpx.MockTransport(handler),
+            sleep=lambda _seconds: None,
+            user_token_provider=provider,
+        ),
+    )
+
+    assert feishu_task.collect(task_config) == []
+    assert "/open-apis/task/v1/tasks" not in seen

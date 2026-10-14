@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 import main as main_module
-from collector import feishu_message, github_commit, github_discussion, github_issue
+from collector import feishu_message, feishu_task, github_commit, github_discussion, github_issue
 from notifier import lark_bot
 from shared.http import FeishuClient, TOKEN_PATH
 from tests.conftest import (
@@ -164,6 +164,8 @@ def _patch_feishu(monkeypatch: pytest.MonkeyPatch, handler) -> None:
         )
 
     monkeypatch.setattr(feishu_message, "build_client", factory)
+    # 任务采集器有自己的 build_client（要挂用户令牌提供者），这里一并替换
+    monkeypatch.setattr(feishu_task, "build_client", factory)
 
 
 def _write_config_with_feishu_tasks(tmp_path: Path) -> Path:
