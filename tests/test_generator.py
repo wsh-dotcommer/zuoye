@@ -138,8 +138,9 @@ def test_header_shows_comparison_and_trend_when_history_exists() -> None:
         ],
     )
 
-    assert "- 对比上期（2026-09-17）：提交 +1 · 任务 +1 · 沟通 +1 · 工时 +0.5h" in report.markdown
-    assert "- 近 3 期：提交 ▁▁█（1 条） · 工时 ▁▁█（0.5h）" in report.markdown
+    # v2.7：工时含提交 10:00 + 任务 11:00 + 评论 12:00，同一工作段 = 2h + 0.5h 收尾
+    assert "- 对比上期（2026-09-17）：提交 +1 · 任务 +1 · 沟通 +1 · 工时 +2.5h" in report.markdown
+    assert "- 近 3 期：提交 ▁▁█（1 条） · 工时 ▁▁█（2.5h）" in report.markdown
     assert "head-lines" in report.html  # HTML 版与 Markdown 用同一份 view
 
 
@@ -253,8 +254,9 @@ def test_hours_section_order_and_content() -> None:
 
     # 布局顺序照书里 v1.1 的要求：任务进展 → 工时统计 → 协作沟通
     assert markdown.index("### 任务进展") < markdown.index("### 工时统计") < markdown.index("### 协作沟通")
-    assert "- 工时：0.5h（1 条提交，1 个工作段）" in markdown
-    assert "- 工时：团队合计 0.5h · 人均 0.25h（按提交时间推导，非真实考勤）" in markdown
+    # v2.7：提交 10:00 + 任务变更 11:00 落在同一工作段（该夹具的评论源是失败态，不计入）
+    assert "- 工时：1.5h（提交 1 · 任务 1，1 个工作段）" in markdown
+    assert "- 工时：团队合计 1.5h · 人均 0.75h（按提交/任务/评论时间推导，非真实考勤）" in markdown
 
 
 def test_hours_empty_state() -> None:
@@ -264,13 +266,31 @@ def test_hours_empty_state() -> None:
     assert "- 0h（今日无记录）" in zhang_section
 
 
-def test_hours_unavailable_when_commit_source_fails() -> None:
+def test_hours_still_derived_when_only_commit_source_fails() -> None:
+    """v2.7：只要还有活动源成功就用它推导，不再整块作废。"""
+
     statuses = [
         SourceStatus(name=SOURCE_COMMIT, ok=False, count=0, error="GitHub API 超时"),
         SourceStatus(name=SOURCE_ISSUE, ok=True, count=1),
         SourceStatus(name=SOURCE_DISCUSSION, ok=True, count=1),
     ]
     report = formatter.generate(date(2026, 9, 18), MEMBERS, [], TASKS, MESSAGES, statuses, "测试团队")
+
+    # 红豆：任务 11:00 + 评论 12:00 → 同一工作段
+    assert "- 工时：1.5h（任务 1 · 评论 1，1 个工作段）" in report.markdown
+    assert "- 工时：团队合计 1.5h · 人均 0.75h" in report.markdown
+    assert "工时数据不可用" not in report.markdown
+    # 提交板块本身仍然如实标注失败
+    assert "数据获取失败（GitHub API 超时）" in report.markdown
+
+
+def test_hours_unavailable_only_when_all_activity_sources_fail() -> None:
+    statuses = [
+        SourceStatus(name=SOURCE_COMMIT, ok=False, count=0, error="GitHub API 超时"),
+        SourceStatus(name=SOURCE_ISSUE, ok=False, count=0, error="GitHub API 超时"),
+        SourceStatus(name=SOURCE_DISCUSSION, ok=False, count=0, error="GitHub API 超时"),
+    ]
+    report = formatter.generate(date(2026, 9, 18), MEMBERS, [], [], [], statuses, "测试团队")
 
     assert "工时数据不可用（GitHub API 超时）" in report.markdown
     assert "工时数据不可用（GitHub API 超时）" in report.html
@@ -297,7 +317,7 @@ def test_html_contains_hours_block() -> None:
     html = _report().html
 
     assert "<h3>工时统计</h3>" in html
-    assert "按提交时间推导，非真实考勤" in html
+    assert "按提交/任务/评论时间推导，非真实考勤" in html
 
 
 def test_empty_member_sections_show_placeholder() -> None:

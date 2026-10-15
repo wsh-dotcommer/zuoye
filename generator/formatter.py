@@ -112,7 +112,7 @@ def generate(
     member_list = list(members)
     rules = hours_rules or hours_module.HoursRules()
     work_hours = _derive_work_hours(
-        member_list, commits, source_statuses, timezone_name, rules
+        member_list, commits, tasks, messages, source_statuses, timezone_name, rules
     ) if rules.enabled else {}
 
     member_reports = _aggregate(member_list, commits, tasks, messages, work_hours)
@@ -588,7 +588,7 @@ def _hours_section(member: MemberReport) -> dict | None:
         "key": "hours",
         "title": title,
         "state": "ok",
-        "lines": [f"- 工时：{_format_hours(record.hours)}h（{record.commit_count} 条提交，{record.session_count} 个工作段）"],
+        "lines": [f"- 工时：{_format_hours(record.hours)}h（{record.detail}）"],
         "entries": [],
         "note": "",
     }
@@ -608,17 +608,41 @@ def _hours_summary(report: DailyReport) -> dict:
 def _derive_work_hours(
     members: Sequence[MemberConfig],
     commits: Sequence[CommitRecord],
+    tasks: Sequence[TaskRecord],
+    messages: Sequence[MessageRecord],
     statuses: Sequence[SourceStatus],
     timezone_name: str,
     rules: hours_module.HoursRules,
 ) -> dict:
-    """提交数据源失败时全员标记不可用，否则按会话法推导。"""
+    """按会话法推导工时（v2.7）。
 
-    commit_status = next((status for status in statuses if status.name == SOURCE_COMMIT), None)
-    if commit_status is not None and not commit_status.ok:
-        return hours_module.unavailable_records(members, commit_status.error)
-    # 传进来的提交已由采集层按采集窗口裁剪，这里不再二次过滤
-    return hours_module.derive(members, commits, UNBOUNDED_WINDOW, timezone_name, rules)
+    活动有三个来源：提交、Issue 状态变更、评论。**三个源全部失败**才判"不可用"；
+    只要有一个成功就用成功的那些推导——失败的数据源已经在头部徽章里标出来了，
+    这里不再把整块工时一起作废（旧规则是"提交源失败就全员不可用"，v2.7 放宽）。
+    """
+
+    activity_sources = (SOURCE_COMMIT, SOURCE_ISSUE, SOURCE_DISCUSSION)
+    relevant = [status for status in statuses if status.name in activity_sources]
+    if relevant and not any(status.ok for status in relevant):
+        reason = next((status.error for status in relevant if status.error), "")
+        return hours_module.unavailable_records(members, reason or "所有活动数据源均不可用")
+
+    def source_ok(name: str) -> bool:
+        """没记录状态的数据源按"可用"处理（直接调用生成层的场景）。"""
+
+        status = next((item for item in statuses if item.name == name), None)
+        return status is None or status.ok
+
+    # 传进来的活动已由采集层按采集窗口裁剪，这里不再二次过滤
+    return hours_module.derive(
+        members,
+        commits if source_ok(SOURCE_COMMIT) else [],
+        UNBOUNDED_WINDOW,
+        timezone_name,
+        rules,
+        tasks=tasks if source_ok(SOURCE_ISSUE) else [],
+        messages=messages if source_ok(SOURCE_DISCUSSION) else [],
+    )
 
 
 def _format_hours(value: float) -> str:

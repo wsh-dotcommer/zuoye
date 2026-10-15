@@ -234,7 +234,9 @@ def test_full_pipeline_generates_report_and_site(tmp_path: Path, monkeypatch) ->
     assert "### 工时统计" in markdown
     assert "### 协作沟通" in markdown
     assert markdown.index("### 任务进展") < markdown.index("### 工时统计") < markdown.index("### 协作沟通")
-    assert "- 工时：团队合计 1h · 人均 0.5h（按提交时间推导，非真实考勤）" in markdown
+    # v2.7：工时按活动时间推导（红豆 05:00 任务 + 06:00 评论 + 10:00 提交 → 2 段；张三 11:00 提交 → 1 段）
+    assert "- 工时：团队合计 2.5h · 人均 1.25h（按提交/任务/评论时间推导，非真实考勤）" in markdown
+    assert "- 工时：2h（提交 1 · 任务 1 · 评论 1，2 个工作段）" in markdown
     assert "## 红豆（wsh-dotcommer）" in markdown
     assert "静态日报站上线：进行中 → 已完成" in markdown
     assert "feat: 索引页已经可以点击跳转" in markdown
@@ -302,7 +304,7 @@ def test_empty_data_shows_placeholder(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_hours_unavailable_when_commits_fail(tmp_path: Path, monkeypatch) -> None:
-    """提交数据源失败时，工时板块必须显式标注不可用，其余板块正常（降级场景 v1.1）。"""
+    """v2.7：只有提交源失败时，工时改由任务/评论推导；提交板块本身仍标注失败。"""
 
     api = FakeApi(fail_commits=True)
     _patch_collectors(monkeypatch, api)
@@ -312,7 +314,10 @@ def test_hours_unavailable_when_commits_fail(tmp_path: Path, monkeypatch) -> Non
 
     assert exit_code == 0
     markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
-    assert "工时数据不可用" in markdown
+    # 红豆：任务 05:00Z + 评论 06:00Z → 同一工作段 1h + 0.5h 收尾
+    assert "- 工时：1.5h（任务 1 · 评论 1，1 个工作段）" in markdown
+    assert "工时数据不可用" not in markdown
+    assert "数据获取失败" in markdown  # 提交板块如实标注
     assert "### 协作沟通" in markdown
     assert "feat: 索引页已经可以点击跳转" in markdown
 
@@ -441,8 +446,8 @@ def test_second_run_adds_comparison_trend_and_site_chart(tmp_path: Path, monkeyp
     assert main_module.main(["--config", str(config_path), "--date", DAY, "--dry-run"]) == 0
 
     markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
-    assert "- 对比上期（2026-09-17）：提交 +2 · 任务 +1 · 沟通 +1 · 工时 +1h" in markdown
-    assert "- 近 3 期：提交 ▁▁█（2 条） · 工时 ▁▁█（1h）" in markdown
+    assert "- 对比上期（2026-09-17）：提交 +2 · 任务 +1 · 沟通 +1 · 工时 +2.5h" in markdown
+    assert "- 近 3 期：提交 ▁▁█（2 条） · 工时 ▁▁█（2.5h）" in markdown
 
     index = (tmp_path / "docs" / "index.html").read_text(encoding="utf-8")
     assert 'id="trend-title"' in index and "<svg" in index

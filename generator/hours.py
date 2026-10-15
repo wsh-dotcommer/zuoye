@@ -1,9 +1,14 @@
 """工时推导（design.md §4.2、§6.4，Task 11 v1.1）。
 
 接口契约：
-    derive(members, commits, window, timezone_name, rules) -> dict[str, WorkHoursRecord]
+    derive(members, commits, window, timezone_name, rules, *, tasks=(), messages=())
+        -> dict[str, WorkHoursRecord]
 
 纯本地计算：不访问网络、不读写文件，同一组提交必然得到同一结果。
+
+v2.7：口径从"只按提交时间"扩到"按活动时间"——提交、Issue 状态变更、评论
+三条时间线合并成一条活动流，再交给同一套会话法。`tasks`/`messages` 是仅
+关键字参数且默认空，因此旧调用行为不变。
 """
 
 from __future__ import annotations
@@ -20,6 +25,8 @@ from shared.models import (
     HOURS_OK,
     HOURS_UNAVAILABLE,
     CommitRecord,
+    MessageRecord,
+    TaskRecord,
     WorkHoursRecord,
 )
 
@@ -53,23 +60,40 @@ def derive(
     window: tuple[datetime, datetime],
     timezone_name: str,
     rules: HoursRules,
+    *,
+    tasks: Sequence[TaskRecord] = (),
+    messages: Sequence[MessageRecord] = (),
 ) -> dict[str, WorkHoursRecord]:
-    """按会话法推导每位成员的工时，返回 {成员 GitHub 用户名(小写): 工时记录}。"""
+    """按会话法推导每位成员的工时，返回 {成员 GitHub 用户名(小写): 工时记录}。
+
+    活动三类：提交（`author`）、任务状态变更（`assignee`，用变更发生的那一刻）、
+    评论（`sender`）。三类按采集窗口左闭右开过滤，未匹配到成员的身份不计入。
+    """
 
     member_list = list(members)
     timezone = ZoneInfo(timezone_name)
     records: dict[str, WorkHoursRecord] = {}
 
-    # 先按 (成员, 自然日) 归组窗口内的提交
+    # 先按 (成员, 自然日) 归组窗口内的活动
     grouped: dict[str, dict[object, list[datetime]]] = {_key(member): {} for member in member_list}
-    for commit in commits:
-        if not (window[0] <= commit.timestamp < window[1]):
-            continue
-        member = _owner(member_list, commit.author)
+    counts: dict[str, list[int]] = {_key(member): [0, 0, 0] for member in member_list}  # 提交/任务/评论
+
+    def record_activity(identity: str, moment: datetime, kind: int) -> None:
+        if not (window[0] <= moment < window[1]):
+            return
+        member = _owner(member_list, identity)
         if member is None:
-            continue
-        local_moment = commit.timestamp.astimezone(timezone)
+            return
+        local_moment = moment.astimezone(timezone)
         grouped[_key(member)].setdefault(local_moment.date(), []).append(local_moment)
+        counts[_key(member)][kind] += 1
+
+    for commit in commits:
+        record_activity(commit.author, commit.timestamp, 0)
+    for task in tasks:
+        record_activity(task.assignee, task.updated_at, 1)
+    for message in messages:
+        record_activity(message.sender, message.timestamp, 2)
 
     for member in member_list:
         moments_by_day = grouped[_key(member)]
@@ -79,7 +103,7 @@ def derive(
 
         total_hours = 0.0
         session_count = 0
-        commit_count = 0
+        activity_count = 0
         for _, moments in sorted(moments_by_day.items(), key=lambda item: item[0]):
             sessions = _split_sessions(sorted(moments), rules)
             day_hours = sum(_session_hours(session, rules) for session in sessions)
@@ -87,16 +111,48 @@ def derive(
             day_hours = _round_to_grid(day_hours, rules.rounding_hours)
             total_hours += day_hours
             session_count += len(sessions)
-            commit_count += len(moments)
+            activity_count += len(moments)
 
+        commits_n, tasks_n, comments_n = counts[_key(member)]
         records[_key(member)] = WorkHoursRecord(
             hours=round(total_hours, 2),
             session_count=session_count,
-            commit_count=commit_count,
+            commit_count=commits_n,
+            task_count=tasks_n,
+            comment_count=comments_n,
             state=HOURS_OK,
-            detail=f"{commit_count} 条提交，{session_count} 个工作段",
+            detail=_build_detail(
+                commit_count=commits_n,
+                task_count=tasks_n,
+                comment_count=comments_n,
+                session_count=session_count,
+                activity_count=activity_count,
+            ),
         )
     return records
+
+
+def _build_detail(
+    *,
+    commit_count: int,
+    task_count: int,
+    comment_count: int,
+    session_count: int,
+    activity_count: int,
+) -> str:
+    """工时行的括号补充：只列非零类别，避免出现"任务 0"这种噪音。"""
+
+    parts: list[str] = []
+    if commit_count:
+        parts.append(f"提交 {commit_count}")
+    if task_count:
+        parts.append(f"任务 {task_count}")
+    if comment_count:
+        parts.append(f"评论 {comment_count}")
+    if not parts:
+        # 理论上进不来（有活动才有此行），留个兜底避免出现空括号
+        parts.append(f"{activity_count} 条活动")
+    return " · ".join(parts) + f"，{session_count} 个工作段"
 
 
 def unavailable_records(

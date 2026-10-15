@@ -38,7 +38,7 @@ HOURS_EMPTY = "empty"
 HOURS_UNAVAILABLE = "unavailable"
 
 # 工时口径说明：任何对外呈现都必须带上（design.md §6.4）
-WORK_HOURS_NOTE = "按提交时间推导，非真实考勤"
+WORK_HOURS_NOTE = "按提交/任务/评论时间推导，非真实考勤"
 
 
 @dataclass(frozen=True)
@@ -85,17 +85,29 @@ class MessageRecord:
 
 @dataclass(frozen=True)
 class WorkHoursRecord:
-    """工时记录（v1.1）：由提交时间按会话法推导得出。"""
+    """工时记录（v1.1；v2.7 起按"活动时间"推导）。
+
+    活动 = GitHub 上留下的工作痕迹，分三类：提交（author）、Issue 状态变更
+    （assignee）、评论（sender）。三类时间戳合成一条活动流，再按会话法推导。
+    """
 
     hours: float = 0.0
     session_count: int = 0
     commit_count: int = 0
+    task_count: int = 0
+    comment_count: int = 0
     state: str = HOURS_EMPTY
     detail: str = ""
 
     @property
     def available(self) -> bool:
         return self.state != HOURS_UNAVAILABLE
+
+    @property
+    def activity_count(self) -> int:
+        """参与推导的活动总条数（提交 + 任务状态变更 + 评论）。"""
+
+        return self.commit_count + self.task_count + self.comment_count
 
 
 @dataclass(frozen=True)
