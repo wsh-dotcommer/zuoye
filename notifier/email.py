@@ -71,7 +71,9 @@ def _build_message(report: DailyReport, target: EmailTarget) -> EmailMessage:
     message["From"] = target.sender
     message["To"] = ", ".join(target.recipients)
     message.set_content(report.markdown or "（日报内容为空）")
-    message.add_alternative(report.html or "<p>（日报内容为空）</p>", subtype="html")
+    # v2.6：优先用邮件专用 HTML（内联样式、表格布局），没有时回退站点版
+    html_body = report.email_html or report.html
+    message.add_alternative(html_body or "<p>（日报内容为空）</p>", subtype="html")
     return message
 
 

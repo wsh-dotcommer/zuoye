@@ -148,6 +148,7 @@ def generate(
     view = build_view(report, feishu_task_section=task_section)
     report.markdown = render_markdown(view)
     report.html = template.render_report_html(view)
+    report.email_html = template.render_email_html(view)
     return report
 
 

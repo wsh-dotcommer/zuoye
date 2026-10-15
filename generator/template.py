@@ -27,20 +27,23 @@ _env = Environment(
 _LINK_PATTERN = re.compile(r"\[([^\[\]]+)\]\((https?://[^\s()<>]+)\)")
 
 
-def render_inline_links(text: str) -> Markup:
+def render_inline_links(text: str, style: str = "") -> Markup:
     """把 `[文字](http(s) 链接)` 转成 `<a>`，其余片段照常转义（v2.2）。
 
     先按片段处理再拼接：链接外的文本与锚点文字各自转义，URL 作为属性值转义，
     既避免二次转义，也堵住属性注入。
+
+    v2.6 起可传 `style`：邮件模板没有 <style> 块，链接颜色只能内联。
     """
 
     source = str(text)
+    extra = f' style="{escape(style, quote=True)}"' if style else ""
     out: list[str] = []
     cursor = 0
     for match in _LINK_PATTERN.finditer(source):
         out.append(escape(source[cursor : match.start()]))
         out.append(
-            f'<a href="{escape(match.group(2), quote=True)}" target="_blank" rel="noopener">'
+            f'<a href="{escape(match.group(2), quote=True)}" target="_blank" rel="noopener"{extra}>'
             f"{escape(match.group(1))}</a>"
         )
         cursor = match.end()
@@ -74,6 +77,17 @@ def render_report_html(
         workbench_data=render_workbench_data(view, markdown),
         workbench_js=render_workbench_js() if interactive else "",
     )
+
+
+def render_email_html(view: dict) -> str:
+    """渲染邮件专用 HTML（v2.6）。
+
+    与站点详情页共用同一份 `view`，但模板里没有 <style>、没有 class、
+    没有 CSS 变量与 flex——邮件客户端对这些的支持差异极大，站点那套写法
+    在 QQ 邮箱 PC 端会让"白字 + 变量背景"变成看不见的字。
+    """
+
+    return _env.get_template("email.html.j2").render(view=view)
 
 
 def render_index_html(

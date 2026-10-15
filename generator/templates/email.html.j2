@@ -1,0 +1,126 @@
+{# 邮件专用模板（v2.6）。
+
+   与站点详情页共用同一份 view，但**故意**不使用任何站点样式表能力：
+   没有 <style> 块、没有 class 属性、没有 CSS 变量、没有 flex/grid/clamp。
+   所有颜色、边框、圆角、间距都写成字面量内联样式，布局用表格。
+   原因：邮件客户端对 CSS 的支持差异极大（QQ 邮箱 PC 端会丢弃依赖
+   var() 的声明），站点那套写法会让"白字 + 变量背景"变成隐形的字。
+#}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ view.title }}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f3f6f4;color:#1d2925;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;font-size:15px;line-height:1.7;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#f3f6f4;">
+  <tr>
+    <td align="center" style="padding:24px 12px;">
+      <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:640px;background-color:#ffffff;border:1px solid #dce5e0;border-radius:12px;">
+        <tr>
+          <td style="padding:16px 22px;background-color:#ffffff;border-bottom:1px solid #dce5e0;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td width="36" valign="middle">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td width="34" height="34" bgcolor="#176b5b" align="center" valign="middle" style="width:34px;height:34px;background-color:#176b5b;color:#ffffff;font-size:14px;font-weight:700;border-radius:9px;">日</td>
+                    </tr>
+                  </table>
+                </td>
+                <td valign="middle" style="padding-left:10px;">
+                  <div style="font-size:15px;font-weight:700;color:#1d2925;">{{ view.heading }}</div>
+                  <div style="font-size:12px;color:#697770;">由 GitHub 数据自动生成</div>
+                </td>
+                <td align="right" valign="middle" style="font-size:12px;color:#53625c;">只读快照 · {{ view.generated_at }}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:26px 22px 6px;">
+            <div style="font-size:12px;font-weight:700;letter-spacing:.12em;color:#176b5b;">DAILY REPORT</div>
+            <h1 style="margin:8px 0 12px;font-family:'Songti SC','STSong',SimSun,serif;font-size:28px;font-weight:600;line-height:1.3;color:#1d2925;">{{ view.heading }}</h1>
+            <p style="margin:0;color:#53625c;font-size:15px;line-height:1.75;">日期：{{ view.date_label }} · 团队：{{ view.team_label }} · 生成时间：{{ view.generated_at }}</p>
+{% if view.hours_summary %}
+            <p style="margin:6px 0 0;color:#53625c;font-size:15px;line-height:1.75;">工时：团队合计 {{ view.hours_summary.total }}h · 人均 {{ view.hours_summary.average }}h（{{ view.hours_summary.note }}）</p>
+{% endif %}
+            <div style="margin-top:14px;font-size:0;">
+{% for source in view.source_summary %}
+              <span style="display:inline-block;padding:4px 11px;margin:0 6px 6px 0;border:1px solid {{ '#cfe3d9' if source.ok else '#e3b7b2' }};border-radius:999px;background-color:{{ '#e7f3ee' if source.ok else '#fff1ef' }};color:{{ '#176b5b' if source.ok else '#a53939' }};font-size:12.5px;">{{ source.label }} {{ source.count }} 条{% if not source.ok %} · 数据获取失败{% endif %}</span>
+{% endfor %}
+            </div>
+{% if view.extra_lines %}
+            <div style="margin-top:8px;color:#53625c;font-size:13px;line-height:1.8;">
+{% for line in view.extra_lines %}
+              <div>{{ line }}</div>
+{% endfor %}
+            </div>
+{% endif %}
+          </td>
+        </tr>
+{% for member in view.members %}
+        <tr>
+          <td style="padding:0 22px 20px;">
+{% if not view.single_member %}
+            <div style="padding:14px 0 6px;border-top:1px solid #edf1ee;">
+              <div style="font-size:12px;color:#697770;">Member · 成员日报</div>
+              <div style="font-size:18px;font-weight:700;color:#1d2925;">{{ member.name }}<span style="color:#697770;font-size:13px;font-weight:400;"> @{{ member.github_username }}</span></div>
+            </div>
+{% endif %}
+{% for section in member.sections %}
+            <div style="margin-top:16px;padding-top:16px;border-top:1px solid #edf1ee;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td valign="bottom" style="font-size:{{ '13.5px' if section.sub else '15px' }};font-weight:700;color:{{ '#53625c' if section.sub else '#1d2925' }};">{{ section.title }}</td>
+{% if section.state == "ok" and section.title != "工时统计" %}
+                  <td align="right" valign="bottom" style="font-size:12px;color:#697770;white-space:nowrap;">{{ section.lines|length }} 条</td>
+{% endif %}
+                </tr>
+              </table>
+{% if section.state == "ok" %}
+              <ul style="margin:8px 0 0;padding-left:20px;color:#1d2925;">
+{% if section.entries %}
+{% for item in section.entries %}
+                <li style="margin:6px 0;">
+                  <div>{{ item.main | inline_links('color:#176b5b;text-decoration:underline;') }}</div>
+{% if item.meta %}
+                  <div style="color:#697770;font-size:12.5px;">{{ item.meta | inline_links('color:#176b5b;text-decoration:underline;') }}</div>
+{% endif %}
+                </li>
+{% endfor %}
+{% else %}
+{% for item in section.lines %}
+                <li style="margin:4px 0;">{{ (item[2:] if item.startswith("- ") else item) | inline_links('color:#176b5b;text-decoration:underline;') }}</li>
+{% endfor %}
+{% endif %}
+              </ul>
+{% elif section.state == "empty" %}
+{% if section.merged %}
+              <p style="margin:8px 0 0;color:#697770;font-size:13px;">{{ section.note }}</p>
+{% else %}
+              <p style="margin:8px 0 0;padding:14px 16px;border:1px dashed #c9d6cf;border-radius:10px;background-color:#f8faf9;color:#697770;font-size:13px;">{{ section.note }}</p>
+{% endif %}
+{% else %}
+              <p style="margin:8px 0 0;padding:14px 16px;border:1px dashed #e3b7b2;border-radius:10px;background-color:#fff1ef;color:#a53939;font-size:13px;">{{ section.note }}</p>
+{% endif %}
+            </div>
+{% endfor %}
+          </td>
+        </tr>
+{% endfor %}
+        <tr>
+          <td style="padding:0 22px 22px;">
+            <p style="margin:20px 0 0;padding-top:14px;border-top:1px solid #dce5e0;color:#697770;font-size:12px;text-align:center;">由智能日报生成器生成 · {{ view.generated_at }}</p>
+{% if view.attribution %}
+            <p style="margin:10px 0 0;padding-top:12px;border-top:1px solid #dce5e0;color:#697770;font-size:12.5px;line-height:1.7;overflow-wrap:anywhere;">{{ view.attribution }}</p>
+{% endif %}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

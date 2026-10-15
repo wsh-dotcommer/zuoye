@@ -21,6 +21,7 @@
 | v2.5 | 缺陷修复（起点为代码，逆向回溯更新本文件） | 飞书任务读不到数据：飞书任务接口区分身份，应用身份（`tenant_access_token`）读「我负责的」任务时「我」指应用自己，因此永远是空。新增 `shared/feishu_oauth.py`（授权链接、授权码换令牌、refresh_token 续期、本地令牌文件）与一次性脚本 `authorize-feishu.py`，采集器在有用户令牌时改用 `user_access_token` 并同时查询 v1「我负责的」列表（§4.1）；`FeishuClient` 增加 `as_user` 维度的认证（§2）。需求边界未变，故 `proposal.md` 与 `tasks.md` 不升版 |
 | v2.5.1 | 缺陷修复（起点为代码，逆向回溯更新本文件） | 授权卡在"浏览器回调到本机端口"这一环：`authorize-feishu.py` 新增 `--manual`（不启动本地服务器，把地址栏整条链接或裸授权码粘回终端，由 `shared/feishu_oauth.parse_callback_input()` 解析）、等待期每 10 秒心跳提示、失败时用 `hint_for_authorize_error()` 把错误翻译成"下一步做什么"，并把令牌文件路径打印为绝对路径。默认模式行为不变，故 `proposal.md` 与 `tasks.md` 不升版 |
 | v2.5.2 | 需求澄清（起点为代码，逆向回溯更新本文件） | 飞书任务小节从"全量快照"收紧为"当天仍有意义"：新增 `FeishuTaskRecord.completed_at`，采集层在映射后隐藏"状态=已完成且完成时间早于采集窗口起点"的记录（窗口起点即日报目标日 00:00，补跑按那天算；`start` 为空或任务缺完成时间时不过滤），并记 `feishu_tasks_filtered` 日志；小节为空时文案改为「今日无飞书任务」。展示口径调整，故 `proposal.md` 与 `tasks.md` 不升版 |
+| v2.6 | 缺陷修复（起点为代码，逆向回溯更新本文件） | 邮件在 PC 与手机渲染不一致、页头「日」图标消失：根因是邮件正文直接复用站点页面，依赖 9KB `<style>`、103 处 `var(--…)` 与 flex，而 QQ 邮箱 PC 端会丢弃依赖 CSS 变量的声明（白字落在透明背景上）。新增邮件专用模板 `generator/templates/email.html.j2` 与 `template.render_email_html(view)`（表格布局 + 全内联字面量样式，不含 `<style>`/class/`var()`/flex/grid/clamp），`DailyReport` 增加 `email_html`，推送层优先使用它（为空回退站点版）；`main.py` 另存 `output/daily-report-<date>.email.html` 便于排查；`inline_links` 过滤器支持传入内联链接颜色。站点页面与飞书卡片渲染不变，故 `proposal.md` 与 `tasks.md` 不升版 |
 
 ## 1. 系统架构
 
@@ -316,7 +317,8 @@ send(report: DailyReport, target: EmailTarget | LarkBotTarget) -> bool
 check(target: LarkBotTarget) -> tuple[bool, str]      # v1.2
 ```
 
-- 邮件：正文为 `report.html`；SMTP 发送失败重试 2 次，仍失败返回 `False` 并记错误日志。
+- 邮件：正文为邮件专用 HTML（见下条）；SMTP 发送失败重试 2 次，仍失败返回 `False` 并记错误日志。
+- 邮件正文渲染（v2.6）：HTML 部分取 `report.email_html`（由 `template.render_email_html(view)` 产出——表格布局 + 全内联字面量样式，**不含** `<style>`、`class`、`var()`、flex/grid/clamp；页头色块同时写 `bgcolor` 属性兜底），为空时回退 `report.html`；纯文本部分仍是 `report.markdown`。邮件与站点共用同一份 `view`，因此两端**文字内容永远一致**，差异只在排版层（ADR-012）。
 - 邮件主题（v2.4.1）：`notify.email.subject_prefix` 非空时为 `<前缀> <团队名> <日期> 智能日报`（例 `研一 王帅豪 2026-10-13 智能日报`，团队名取配置 `team.name`，前缀内多余空白会被归一），留空时为 `[<团队名>] <日期> 智能日报`（v1.0 以来的格式，向后兼容）。主题由 `notifier/email.py` 的 `build_subject()` 单独拼装，与正文标题（§4.2）、飞书卡片标题互不影响。
 - 飞书机器人：发送交互式卡片（`lark_md` 渲染 Markdown），超长内容截断到 4000 字符；发送失败重试 2 次，仍失败返回 `False` 并记错误日志。
 - 截断保留标注（v2.4）：截断前先把末尾的「数据来源」标注摘出来（`_split_attribution`），按 `4000 − len(标注) − 1` 的预算截正文，再把标注原样拼回末尾——标注是合规要求，不能因为正文过长就被砍掉。
@@ -517,6 +519,24 @@ check(target: LarkBotTarget) -> tuple[bool, str]      # v1.2
 **决策**：采用第三种。任务状态取"生成日报那一刻"的快照，小标题里显式标注快照时间；补跑历史日期时额外标注「补跑快照」。proposal §2.2 明确把"定时刷新与常驻同步"列为排除项。
 
 **理由**：1）在不新增常驻进程与不增加限流预算的前提下，快照方案的信息是**诚实**的——读者看到的每个状态都对应一个明确的时间戳，而"15 分钟的活页"反而会让人误以为页面数字是当天累计；2）收益与成本不成比例：日报本身是每日一次的产物，"分钟级刷新"对日报读者没有实际增量；3）若日后确实需要，`--sync-tasks` 是一条独立的演进路径，不阻塞本期交付。
+
+### ADR-012：邮件与网页分流——邮件走专用内联样式模板（v2.6）
+
+**背景**：邮件正文原本直接复用站点详情页的 HTML（`render_report_html`），即"一个完整网页 + 9KB `<style>` 块"。实测在 QQ 邮箱 PC 端与手机端渲染差异很大：胶囊标签退化成一排黑字、强调色丢失，页头那个「日」方块（白字 + `var(--accent)` 背景）**整字消失**。
+
+**选项对比**：
+
+| 方案 | 优点 | 代价 |
+| --- | --- | --- |
+| 继续复用站点 HTML | 一处渲染、内容天然一致 | 邮件客户端支持度参差；依赖 `var()` 的声明被丢就出现隐形文字；修一个客户端可能弄坏另一个 |
+| 给 CSS 变量加字面量回退（`var(--x, #hex)`） | 改动最小 | 只对"支持 var() 但丢了 `:root`"的客户端有效；对完全不支持 `var()` 的引擎无效；flex 布局差异仍在 |
+| 邮件专用模板：表格布局 + 全内联字面量样式 | 不依赖任何"看客户端脸色"的能力；页头用 `bgcolor` 属性兜底，即使 CSS 背景被丢弃白字也有底色 | 多一份模板；邮件 HTML 体积略增；站点与邮件的视觉需要人工保持同源 |
+
+**决策**：新增 `generator/templates/email.html.j2` + `template.render_email_html(view)`，邮件不再带 `<style>`、`class`、`var()`、flex/grid/clamp，颜色与间距一律内联字面量；关键色块（页头「日」）同时写 `bgcolor` 属性与 `background-color` 内联样式，双保险。站点页面继续使用带 CSS 变量的富样式（浏览器 100% 支持，不值得为邮件降级）。
+
+**理由**：1）Markdown、站点、邮件共用同一份 `view`，内容仍然同源，分歧只发生在"怎么把这些内容画出来"这一层，这正是应该分开的地方；2）邮件与网页是两种交付媒介，强行共用一套 CSS 只会让两边都不舒服；3）通用 CSS 全部内联后，邮件在 QQ 邮箱 PC/手机、Gmail、Outlook 的表现趋于一致，也顺带免疫了未来任何"某个客户端擅自改样式"的问题。
+
+**代价与约束**：邮件模板不参与站点样式演进，日后加板块时要**同步改两份模板**（`report.html.j2` 与 `email.html.j2`），单元测试对邮件 HTML 的"禁用构造"做了硬断言，防止有人把站点写法又抄回去。
 
 ## 6. 非功能性约束
 

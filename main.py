@@ -264,9 +264,12 @@ def _write_outputs(config: Config, report) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     markdown_path = output_dir / f"daily-report-{report.date.isoformat()}.md"
     html_path = output_dir / f"daily-report-{report.date.isoformat()}.html"
+    email_path = output_dir / f"daily-report-{report.date.isoformat()}.email.html"
     markdown_path.write_text(report.markdown, encoding="utf-8")
     html_path.write_text(report.html, encoding="utf-8")
-    return [markdown_path, html_path]
+    # v2.6：邮件正文单独落一份，方便本地直接打开排查排版
+    email_path.write_text(report.email_html or report.html, encoding="utf-8")
+    return [markdown_path, html_path, email_path]
 
 
 def _push(config: Config, report, logger: JsonLineLogger) -> None:

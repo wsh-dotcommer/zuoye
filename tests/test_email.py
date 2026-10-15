@@ -18,6 +18,7 @@ def _report() -> DailyReport:
         generated_at=datetime(2026, 9, 18, 18, 0, tzinfo=timezone.utc),
         markdown="# 智能日报 · 2026-09-18",
         html="<h1>智能日报 · 2026-09-18</h1>",
+        email_html='<table role="presentation"><tr><td bgcolor="#176b5b">日</td></tr></table>',
     )
 
 
@@ -70,6 +71,19 @@ def test_send_builds_html_message() -> None:
     assert message.get_content_type() == "multipart/alternative"
     html_part = message.get_payload()[1]
     assert html_part.get_content_type() == "text/html"
+
+
+def test_html_part_prefers_email_html_and_falls_back() -> None:
+    """v2.6：HTML 部分优先用邮件专用渲染；没有时回退站点版。"""
+
+    fake = _FakeSmtp()
+    email_notifier.send(_report(), TARGET, smtp_factory=lambda _target: fake, logger=None)
+    assert 'bgcolor="#176b5b"' in fake.sent[0].get_payload()[1].get_content()
+
+    legacy = replace(_report(), email_html="")
+    fallback = _FakeSmtp()
+    email_notifier.send(legacy, TARGET, smtp_factory=lambda _target: fallback, logger=None)
+    assert "智能日报 · 2026-09-18" in fallback.sent[0].get_payload()[1].get_content()
 
 
 def test_subject_prefix_replaces_default_format() -> None:
