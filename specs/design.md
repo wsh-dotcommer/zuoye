@@ -1,6 +1,6 @@
 # 智能日报生成器 — 架构设计
 
-规范版本：v2.8（与 `specs/proposal.md` v2.8 对应）
+规范版本：v2.8.1（与 `specs/proposal.md` v2.8 对应）
 
 ## 变更记录
 
@@ -24,6 +24,7 @@
 | v2.6 | 缺陷修复（起点为代码，逆向回溯更新本文件） | 邮件在 PC 与手机渲染不一致、页头「日」图标消失：根因是邮件正文直接复用站点页面，依赖 9KB `<style>`、103 处 `var(--…)` 与 flex，而 QQ 邮箱 PC 端会丢弃依赖 CSS 变量的声明（白字落在透明背景上）。新增邮件专用模板 `generator/templates/email.html.j2` 与 `template.render_email_html(view)`（表格布局 + 全内联字面量样式，不含 `<style>`/class/`var()`/flex/grid/clamp），`DailyReport` 增加 `email_html`，推送层优先使用它（为空回退站点版）；`main.py` 另存 `output/daily-report-<date>.email.html` 便于排查；`inline_links` 过滤器支持传入内联链接颜色。站点页面与飞书卡片渲染不变，故 `proposal.md` 与 `tasks.md` 不升版 |
 | v2.7 | 需求变更（由 proposal.md v2.7 传导） | 工时口径从"提交时间"扩到"活动时间"：`derive()` 新增仅关键字参数 `tasks` / `messages`，三类活动归一成一条活动流后仍走会话法；`WorkHoursRecord` 增加 `task_count` / `comment_count`（`commit_count` 语义不变）与 `activity_count`，`detail` 改为"提交 x · 任务 y · 评论 z，N 个工作段"（只列非零）；`WORK_HOURS_NOTE` 改为"按提交/任务/评论时间推导，非真实考勤"；`formatter._derive_work_hours()` 按 `SourceStatus` 过滤失败源，并把"提交源失败即全员不可用"放宽为"三个活动源全部失败才不可用"（§4.2/§6.4）。`tasks.md` 新增 Task 22 |
 | v2.8 | 需求变更（由 proposal.md v2.8 传导） | `build_view()` 新增团队级 `management` 摘要（今日概览 / 需要关注 / 下一步）并在 Markdown、站点、邮件、飞书卡片中复用；`DailyReport` 新增 `public_url`，配置新增可选 `report.public_base_url`，用于生成当天详情页入口；邮件模板继续只使用表格与内联字面量样式。新增 ADR-014，`tasks.md` 新增 Task 23 |
+| v2.8.1 | 展示文案修复（起点为代码，逆向回溯更新本文件） | §4.2 空板块合并标题由「今日无记录」改为「部分板块无记录」，正文直接列具体板块，避免读者把局部空板块误判为整份日报无数据；「下一步」不再在列表项内重复状态圆点，只保留 HTML/邮件原生列表符号，状态仍用文字标注。需求边界未变，故 `proposal.md` 与 `tasks.md` 不升版 |
 
 ## 1. 系统架构
 
@@ -271,7 +272,7 @@ generate(
 - 邮件主题的例外（v2.4.1）：上一条说的"邮件主题不在本口径内"仍然成立——`notify.email.subject_prefix` 非空时主题改用 `<前缀> <团队名> <日期> 智能日报`（例 `研一 王帅豪 2026-10-13 智能日报`），与正文标题、飞书卡片标题互不影响；留空时维持 `[团队名] 日期 智能日报`。
 - 标题分级（v2.4）：`build_view()` 新增 `heading`，值为 `<团队名> 智能日报`（不带日期），供正文 `<h1>` 与 Markdown 的 `# ` 首行使用；`title` 仍是带日期的完整标题，只用于页面 `<title>` 标签与页头品牌区。日期改由头部信息行承载（`- 日期：YYYY-MM-DD`），窄屏不再把日期断成两行。
 - 头部信息行（v2.4）：HTML 侧拆成两段——第一段 `日期：… · 团队：… · 生成时间：…`，第二段 `工时：团队合计 …h · 人均 …h（口径）`；Markdown 侧保持"每项一条 `- ` 列表项"的既有形态，只新增 `- 日期：` 一条。
-- 空板块合并（v2.4）：成员段落生成后做一次后处理——`MERGEABLE_SECTION_KEYS`（commits/tasks/messages）里状态为 `empty` 的板块 ≥ 2 个时，合并为一条 `今日无记录：板块 A、板块 B`，留在第一个空板块的位置，其余空板块移除；工时统计与飞书任务带各自口径，不参与合并。板块视图新增 `key` 字段供该规则判断，合并项带 `merged=True`，HTML 用 `.empty-line`（一行文字）而不是虚线方框渲染。
+- 空板块合并（v2.4；v2.8.1 调整文案）：成员段落生成后做一次后处理——`MERGEABLE_SECTION_KEYS`（commits/tasks/messages）里状态为 `empty` 的板块 ≥ 2 个时，合并为标题「部分板块无记录」、正文「板块 A、板块 B」的一条记录，留在第一个空板块的位置，其余空板块移除；工时统计与飞书任务带各自口径，不参与合并。板块视图新增 `key` 字段供该规则判断，合并项带 `merged=True`，HTML 用 `.empty-line`（一行文字）而不是虚线方框渲染。
 - 「数据来源」标注（v2.4）：`build_attribution(generated_at, source_refs, scope, timezone_name)` 拼出整行——`数据来源：<各源全称，顿号分隔> ｜ 采集时间：YYYY-MM-DD HH:MM（时区）｜ 授权范围：<scope>`；`source_refs` 为空或 `attribution_scope` 未传时返回空串，调用方据此不渲染，旧调用的产物逐字不变。时区用 `ATTRIBUTION_TIMEZONE_LABELS` 映射（`Asia/Shanghai` → `北京时间`），未命中时直接写时区名。该行共用一份文本：Markdown 由 `_finish_markdown()` 追加在末尾，HTML 由模板渲染为页脚前的 `<p class="attribution">`，飞书卡片跟随 Markdown。
 - 飞书任务子小节（v2.4）：`_feishu_task_section()` 生成一个 `sub=True` 的板块，挂在「任务进展」之后、工时统计之前，且**只渲染一次**（挂在 `members[0]` 上，避免多成员时重复）。小节标题为 `任务进展 · 飞书任务`；`feishu_task` 不在 `source_statuses` 里时返回 `None`，连标题都不出现（未启用时产物与 v2.3 逐字一致）。首行 `- 截至 YYYY-MM-DD HH:MM · 共 N 条：进行中 x · 未开始 y · 已完成 z`（只列非零状态）；随后逐条 `- <标记> 状态 · 标题（截止 YYYY-MM-DD）`，标记为 ● 进行中 / ○ 未开始 / ✓ 已完成；排序 `进行中 → 未开始 → 已完成`，同组按截止日期升序（无截止排最后），最多 20 条（`FEISHU_TASK_LIMIT`），超出追加 `- …（其余 N 条见飞书任务）`，计数仍报全量。目标日期 ≠ 生成当天时标题追加「（补跑快照）」；源失败时输出 `飞书任务数据获取失败（原因）`；任务为空时输出 `飞书工作台暂无任务`。
 - 提交行两行布局（v2.4）：板块视图新增 `entries`（`[{main, meta}]`）与 `lines` 并存——`lines` 是 Markdown/飞书的单行文本（形态不变），`entries` 供 HTML 渲染为"主行 `repo message` + 元信息行 `短 SHA 链接 · +A/-D，N 个文件：…`"，解决一条提交在窄屏折成三行的问题。HTML 模板优先用 `entries`，缺失时回退 `lines`（任务/沟通/工时板块即走回退分支）。

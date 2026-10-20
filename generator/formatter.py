@@ -76,6 +76,7 @@ NEXT_STEP_EMPTY_NOTE = "暂无其他未完成任务"
 # v2.4：内容板块为空时的合并规则（工时统计与飞书任务各自带口径，不参与合并）
 MERGEABLE_SECTION_KEYS = ("commits", "tasks", "messages")
 MERGE_EMPTY_MIN = 2
+MERGED_EMPTY_TITLE = "部分板块无记录"
 
 # 生成层收到的提交已由采集层按采集窗口裁剪，因此推导时不再二次过滤
 UNBOUNDED_WINDOW = (
@@ -265,11 +266,11 @@ def _merge_empty_sections(sections: list[dict]) -> list[dict]:
 
     merged = {
         "key": "empty_summary",
-        "title": "今日无记录",
+        "title": MERGED_EMPTY_TITLE,
         "state": "empty",
         "lines": [],
         "entries": [],
-        "note": "今日无记录：" + "、".join(empty_titles),
+        "note": "、".join(empty_titles),
         "merged": True,
     }
     out: list[dict] = []
@@ -362,7 +363,7 @@ def _management_summary(report: DailyReport) -> dict:
 
     attention_keys = {_task_key(task) for task in attention_tasks}
     next_steps = [
-        f"{FEISHU_TASK_STATUS_MARKS.get(task.status, '·')} {task.status} · "
+        f"{task.status} · "
         f"{_linked_feishu_task(task)}{_feishu_task_due(task)}"
         for task in _next_tasks(report, attention_keys)
     ]

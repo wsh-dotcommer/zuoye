@@ -52,7 +52,8 @@ def test_render_site_writes_expected_files(tmp_path: Path) -> None:
     # 因此这里只检查正文区域不残留 Markdown 标记。
     assert "### " not in detail.split('<script id="workbench-data"', 1)[0]
     # v2.4：本期三个板块全空，合并成一行占位；工时板块保留自己的标题
-    assert '<p class="empty-line">今日无记录：代码提交、任务进展、协作沟通</p>' in detail
+    assert "<h3>部分板块无记录</h3>" in detail
+    assert '<p class="empty-line">代码提交、任务进展、协作沟通</p>' in detail
     assert "<h3>工时统计</h3>" in detail
 
 

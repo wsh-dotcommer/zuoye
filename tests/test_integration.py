@@ -293,8 +293,8 @@ def test_empty_data_shows_placeholder(tmp_path: Path, monkeypatch) -> None:
     assert exit_code == 0
     markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
     # v2.4：每位成员的空板块合并成一行，因此每人只剩一条合并占位
-    assert markdown.count("- 今日无记录") == 2
-    assert "- 今日无记录：代码提交、任务进展、协作沟通" in markdown
+    assert markdown.count("### 部分板块无记录") == 2
+    assert "- 代码提交、任务进展、协作沟通" in markdown
     assert "- 0h（今日无记录）" in markdown
     assert "- 工时：团队合计 0h · 人均 0h" in markdown
 

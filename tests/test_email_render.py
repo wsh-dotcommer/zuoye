@@ -154,7 +154,8 @@ def test_section_states_render_like_detail_page() -> None:
     html = _sparse_report().email_html
 
     # 两个以上空板块合并成一行
-    assert "今日无记录：代码提交、任务进展" in html
+    assert "部分板块无记录" in html
+    assert "代码提交、任务进展" in html
     # 失败板块带自己的配色
     assert "数据获取失败（GitHub API 超时）" in html
     assert "background-color:#fff1ef" in html

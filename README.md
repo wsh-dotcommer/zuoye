@@ -338,7 +338,8 @@ sources:
 
 - **自己的仓库**：把 `repos` 写成 `owner/name`，在 `members` 里登记成员
   （`github_username` + 可选的 `github_emails`，邮箱用于匹配那些没绑定 GitHub 账号的提交）。
-  仓库为空或当天没动静也走得通：日报会如实显示"今日无记录"，而不是报错。
+  仓库为空或当天没动静也走得通：日报会如实显示"今日无记录"，而不是报错；
+  同一成员有多个内容板块为空时会合并为"部分板块无记录"并列出具体板块，其他有数据的板块照常显示。
 - **别人的公开仓库**：直接换成对方的 `owner/name`。因为里面的作者不在你的成员表里，
   把 `sources.github.include_others` 打开，未映射作者会自动单独成段；
   机器人账号（`dependabot[bot]`、`github-actions[bot]` 等）默认被 `exclude_bots` 排除。

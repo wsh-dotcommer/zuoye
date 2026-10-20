@@ -329,8 +329,9 @@ def test_empty_member_sections_show_placeholder() -> None:
 
     # v2.4：≥2 个空板块合并成一行（协作沟通是失败态，不参与合并）
     assert zhang_section.count("### 代码提交") == 0
-    assert "- 今日无记录：代码提交、任务进展" in zhang_section
-    assert zhang_section.count("- 今日无记录") == 1
+    assert "### 部分板块无记录" in zhang_section
+    assert "- 代码提交、任务进展" in zhang_section
+    assert zhang_section.count("### 部分板块无记录") == 1
     assert "- 数据获取失败（GitHub API 超时）" in zhang_section
 
 
@@ -354,8 +355,8 @@ def test_merge_empty_sections_rules() -> None:
     sections.insert(2, block("messages", "协作沟通", "empty"))
     merged = formatter._merge_empty_sections(sections)
 
-    assert [item["title"] for item in merged] == ["今日无记录", "任务进展", "工时统计"]
-    assert merged[0]["note"] == "今日无记录：代码提交、协作沟通"
+    assert [item["title"] for item in merged] == ["部分板块无记录", "任务进展", "工时统计"]
+    assert merged[0]["note"] == "代码提交、协作沟通"
     assert merged[0]["merged"] is True
 
 
@@ -581,7 +582,7 @@ def test_attention_uses_target_date_and_three_day_horizon() -> None:
     ]
     markdown = _management_report(tasks).markdown
     attention = markdown.split("### 需要关注", 1)[1].split("### 下一步", 1)[0]
-    next_steps = markdown.split("### 下一步", 1)[1].split("## 王帅豪", 1)[0]
+    next_steps = markdown.split("### 下一步", 1)[1].split("### 代码提交", 1)[0]
 
     assert attention.index("逾期任务") < attention.index("今天到期") < attention.index("第三天到期")
     assert "逾期 1 天" in attention
@@ -589,6 +590,8 @@ def test_attention_uses_target_date_and_three_day_horizon() -> None:
     assert "2026-09-21 到期" in attention
     assert "第四天到期" not in attention
     assert "已完成不算风险" not in attention
+    assert "- 进行中 · 第四天到期" in next_steps
+    assert "- ● 进行中" not in next_steps
     assert "第四天到期" in next_steps
 
 
@@ -612,7 +615,7 @@ def test_attention_caps_five_tasks_and_next_steps_excludes_duplicates() -> None:
     )
     markdown = _management_report(tasks).markdown
     attention = markdown.split("### 需要关注", 1)[1].split("### 下一步", 1)[0]
-    next_steps = markdown.split("### 下一步", 1)[1].split("## 王帅豪", 1)[0]
+    next_steps = markdown.split("### 下一步", 1)[1].split("### 代码提交", 1)[0]
 
     assert attention.count("临近任务") == 5
     assert "临近任务 5" not in attention
