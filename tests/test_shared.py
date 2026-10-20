@@ -25,7 +25,21 @@ def test_load_config_resolves_env_and_defaults(config: Config, tmp_path: Path) -
     assert len(config.repos) == 1
     assert config.members[0].github_emails == ("hongdou@example.com",)
     assert config.report.site_dir == tmp_path / "docs"
+    assert config.report.public_base_url == ""
     assert config.notify.email.enabled is False
+
+
+def test_load_config_parses_and_normalizes_public_base_url(tmp_path: Path) -> None:
+    text = config_text(tmp_path).replace(
+        "  site_title: 测试日报",
+        "  site_title: 测试日报\n  public_base_url: https://example.com/reports/",
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    loaded = load_config(path, env={"GITHUB_TOKEN": "test-token"})
+
+    assert loaded.report.public_base_url == "https://example.com/reports"
 
 
 def test_load_config_reports_missing_env(config_file: Path) -> None:

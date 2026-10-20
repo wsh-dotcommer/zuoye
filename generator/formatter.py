@@ -65,6 +65,14 @@ FEISHU_TASK_STATUS_MARKS = {
     STATUS_NOT_STARTED: "○",
 }
 
+# v2.8：团队级管理摘要
+ATTENTION_DAYS = 3
+ATTENTION_TASK_LIMIT = 5
+NEXT_STEP_LIMIT = 3
+PROGRESS_LIMIT = 3
+ATTENTION_OK_NOTE = "暂无逾期或临近截止事项，所有数据源正常"
+NEXT_STEP_EMPTY_NOTE = "暂无其他未完成任务"
+
 # v2.4：内容板块为空时的合并规则（工时统计与飞书任务各自带口径，不参与合并）
 MERGEABLE_SECTION_KEYS = ("commits", "tasks", "messages")
 MERGE_EMPTY_MIN = 2
@@ -99,13 +107,15 @@ def generate(
     feishu_tasks: Sequence[FeishuTaskRecord] = (),
     source_refs: Sequence[DataSourceRef] = (),
     attribution_scope: str = "",
+    public_base_url: str = "",
 ) -> DailyReport:
     """按成员聚合记录，产出 Markdown 与 HTML 双形态日报。
 
     `recent`（v2.3）为最近几期已保存日报的结构化统计（升序、不含当日），
     用于头部「对比上期」与「近 N 期」两行；`chat_summaries`（v2.3）为飞书群汇总。
     `feishu_tasks`（v2.4）为飞书任务状态快照；`source_refs` 与 `attribution_scope`
-    组成对外产物末尾的「数据来源」标注（不传来源时整行不出现）。
+    组成对外产物末尾的「数据来源」标注（不传来源时整行不出现）；`public_base_url`
+    （v2.8）用于生成当天在线日报入口，为空时入口不出现。
     新增参数都是仅关键字且带默认值，旧调用无需改动。
     """
 
@@ -138,6 +148,7 @@ def generate(
         recent_stats=list(recent),
         chat_summaries=list(chat_summaries),
         feishu_tasks=list(feishu_tasks),
+        public_url=_public_report_url(public_base_url, date),
     )
     report.attribution = build_attribution(
         generated_at=generated_at,
@@ -178,6 +189,7 @@ def build_view(report: DailyReport, *, feishu_task_section: dict | None = None) 
         "generated_at": _format_moment(report.generated_at),
         "hours_summary": _hours_summary(report) if hours_enabled else None,
         "extra_lines": _extra_lines(report),
+        "management": _management_summary(report),
         "attribution": report.attribution,
         "source_summary": [
             {
@@ -299,6 +311,199 @@ def _extra_lines(report: DailyReport) -> list[str]:
     return lines
 
 
+def _public_report_url(base_url: str, report_date: date) -> str:
+    """把配置的站点根地址拼成当天详情页；未配置时返回空串。"""
+
+    root = (base_url or "").strip().rstrip("/")
+    if not root:
+        return ""
+    return f"{root}/daily-report-{report_date.isoformat()}.html"
+
+
+def _management_summary(report: DailyReport) -> dict:
+    """v2.8：团队级管理摘要，供三端共用。
+
+    只消费日报已有快照，不新增 API 请求。需要关注的范围按目标日计算，
+    因此补跑历史日期时也会以那一天为基准。
+    """
+
+    statuses = {status.name: status for status in report.source_statuses}
+    overview: list[str] = []
+
+    if SOURCE_FEISHU_TASK in statuses:
+        counts = {name: 0 for name in TASK_STATUS_ORDER}
+        for task in report.feishu_tasks:
+            counts[task.status] = counts.get(task.status, 0) + 1
+        overdue = sum(
+            1
+            for task in report.feishu_tasks
+            if task.status != STATUS_DONE and task.due is not None and task.due < report.date
+        )
+        overview.append(
+            f"飞书任务：已完成 {counts[STATUS_DONE]} · 进行中 {counts[STATUS_IN_PROGRESS]}"
+            f" · 未开始 {counts[STATUS_NOT_STARTED]} · 逾期 {overdue}"
+        )
+
+    overview.append(_github_activity_line(report))
+    progress = _progress_lines(report)
+
+    attention_tasks = _attention_tasks(report)
+    attention = [
+        f"{_linked_feishu_task(task)}（{task.status} · {_due_status(task, report.date)}）"
+        for task in attention_tasks
+    ]
+    attention.extend(
+        f"数据源异常：{status.label}（{status.error or '未知原因'}）"
+        for status in report.source_statuses
+        if not status.ok
+    )
+    if not attention:
+        attention = [ATTENTION_OK_NOTE]
+
+    attention_keys = {_task_key(task) for task in attention_tasks}
+    next_steps = [
+        f"{FEISHU_TASK_STATUS_MARKS.get(task.status, '·')} {task.status} · "
+        f"{_linked_feishu_task(task)}{_feishu_task_due(task)}"
+        for task in _next_tasks(report, attention_keys)
+    ]
+    if not next_steps:
+        next_steps = [NEXT_STEP_EMPTY_NOTE]
+
+    return {
+        "online_url": report.public_url,
+        "overview": overview,
+        "progress": progress,
+        "attention": attention,
+        "next_steps": next_steps,
+    }
+
+
+def _github_activity_line(report: DailyReport) -> str:
+    """团队当日 GitHub 活动的紧凑汇总。"""
+
+    commits = [record for member in report.members for record in member.commits]
+    tasks = [record for member in report.members for record in member.tasks]
+    messages = [record for member in report.members for record in member.messages]
+    additions = sum(record.additions for record in commits)
+    deletions = sum(record.deletions for record in commits)
+
+    files: set[str] = set()
+    unnamed_file_changes = 0
+    for record in commits:
+        if record.files:
+            files.update(record.files)
+        else:
+            unnamed_file_changes += record.files_changed
+    file_count = len(files) + unnamed_file_changes
+
+    done = sum(1 for record in tasks if record.status_to == STATUS_DONE)
+    advanced = sum(1 for record in tasks if record.status_to != STATUS_DONE)
+    return (
+        f"GitHub 活动：提交 {len(commits)} 个（+{additions}/-{deletions}，涉及文件 {file_count} 个）"
+        f" · Issue 完成 {done} · 推进 {advanced} · 互动 {len(messages)} 条"
+    )
+
+
+def _progress_lines(report: DailyReport) -> list[str]:
+    """重点进展：飞书已完成 → Issue 已完成 → 最新提交，最多三条。"""
+
+    items: list[str] = []
+    completed_feishu = sorted(
+        (task for task in report.feishu_tasks if task.status == STATUS_DONE),
+        key=lambda task: task.completed_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    for task in completed_feishu:
+        if len(items) >= PROGRESS_LIMIT:
+            break
+        items.append(f"完成飞书任务 {_linked_feishu_task(task)}")
+
+    completed_issues = sorted(
+        (
+            task
+            for member in report.members
+            for task in member.tasks
+            if task.status_to == STATUS_DONE
+        ),
+        key=lambda task: task.updated_at,
+        reverse=True,
+    )
+    for task in completed_issues:
+        if len(items) >= PROGRESS_LIMIT:
+            break
+        items.append(f"完成 GitHub Issue {_task_reference(task)}")
+
+    commits = sorted(
+        (record for member in report.members for record in member.commits),
+        key=lambda record: record.timestamp,
+        reverse=True,
+    )
+    for record in commits:
+        if len(items) >= PROGRESS_LIMIT:
+            break
+        short = (record.sha or "").strip()[:SHA_LENGTH]
+        reference = f"[{short}]({record.url}) " if short and record.url else (f"{short} " if short else "")
+        items.append(f"提交 {reference}{record.message or '(无提交信息)'}")
+    return items
+
+
+def _attention_tasks(report: DailyReport) -> list[FeishuTaskRecord]:
+    """未完成且已逾期、今天到期或未来三天内到期的任务。"""
+
+    horizon = report.date.fromordinal(report.date.toordinal() + ATTENTION_DAYS)
+    return sorted(
+        (
+            task
+            for task in report.feishu_tasks
+            if task.status != STATUS_DONE and task.due is not None and task.due <= horizon
+        ),
+        key=lambda task: (task.due or date.max, _feishu_task_sort_key(task)),
+    )[:ATTENTION_TASK_LIMIT]
+
+
+def _next_tasks(
+    report: DailyReport,
+    excluded_keys: set[str],
+) -> list[FeishuTaskRecord]:
+    """下一步：进行中优先，其次未开始；排除已在“需要关注”中出现的任务。"""
+
+    active = [
+        task
+        for task in report.feishu_tasks
+        if task.status in (STATUS_IN_PROGRESS, STATUS_NOT_STARTED)
+        and _task_key(task) not in excluded_keys
+    ]
+    return sorted(active, key=_feishu_task_sort_key)[:NEXT_STEP_LIMIT]
+
+
+def _task_key(task: FeishuTaskRecord) -> str:
+    if task.guid:
+        return task.guid
+    return f"{task.summary}|{task.due.isoformat() if task.due else ''}"
+
+
+def _linked_feishu_task(task: FeishuTaskRecord) -> str:
+    title = task.summary or "(无标题)"
+    return f"[{title}]({task.url})" if task.url else title
+
+
+def _task_reference(task: TaskRecord) -> str:
+    prefix = ""
+    if task.number:
+        prefix = f"[#{task.number}]({task.url}) " if task.url else f"#{task.number} "
+    return f"{prefix}{task.title or '(无标题)'}"
+
+
+def _due_status(task: FeishuTaskRecord, report_date: date) -> str:
+    if task.due is None:
+        return "未设置截止日期"
+    if task.due < report_date:
+        return f"逾期 {(report_date - task.due).days} 天"
+    if task.due == report_date:
+        return "今天到期"
+    return f"{task.due.isoformat()} 到期"
+
+
 def _chat_line(summaries: Sequence[ChatSummaryRecord]) -> str:
     if not summaries:
         return ""
@@ -387,7 +592,22 @@ def render_markdown(view: dict) -> str:
             f"- 工时：团队合计 {summary['total']}h · 人均 {summary['average']}h（{WORK_HOURS_NOTE}）"
         )
     lines.extend(f"- {line}" for line in view.get("extra_lines") or [])
+    management = view.get("management") or {}
+    if management.get("online_url"):
+        lines.append(f"- 在线日报：[查看当天完整日报]({management['online_url']})")
     lines.append("")
+
+    if management:
+        lines.extend(["## 管理摘要", "", "### 今日概览"])
+        lines.extend(f"- {item}" for item in management.get("overview") or [])
+        if management.get("progress"):
+            lines.append("- 重点进展：" + "；".join(management["progress"]))
+        lines.extend(["", "### 需要关注"])
+        lines.extend(f"- {item}" for item in management.get("attention") or [])
+        lines.extend(["", "### 下一步"])
+        lines.extend(f"- {item}" for item in management.get("next_steps") or [])
+        lines.append("")
+
     if not view["members"]:
         lines.append("（没有可输出的成员段落）")
         return _finish_markdown(lines, view)

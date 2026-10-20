@@ -208,6 +208,7 @@ class DailyReport:
     markdown: str = ""
     html: str = ""
     email_html: str = ""
+    public_url: str = ""
     source_statuses: list[SourceStatus] = field(default_factory=list)
     total_hours: float = 0.0
     member_count: int = 0

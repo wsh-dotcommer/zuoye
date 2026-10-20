@@ -82,6 +82,7 @@ def _full_report():
         ],
         source_refs=[REF],
         attribution_scope="仅限团队内部日报展示",
+        public_base_url="https://example.com/reports/",
     )
 
 
@@ -165,6 +166,31 @@ def test_feishu_task_subsection_renders() -> None:
     assert "任务进展 · 飞书任务" in html
     assert "共 1 条" in html
     assert "● 进行中 · 补集成测试" in html
+
+
+def test_management_summary_and_online_button_are_inline_safe() -> None:
+    html = _full_report().email_html
+
+    assert "管理摘要" in html
+    assert "今日概览" in html and "需要关注" in html and "下一步" in html
+    assert "https://example.com/reports/daily-report-2026-09-18.html" in html
+    assert "查看当天完整日报" in html
+    assert 'bgcolor="#176b5b"' in html
+    assert "display:inline-block" in html
+
+
+def test_online_button_is_absent_when_public_url_is_empty() -> None:
+    report = formatter.generate(
+        date(2026, 9, 18),
+        MEMBERS,
+        COMMITS,
+        [],
+        [],
+        STATUSES_OK,
+        "王帅豪",
+    )
+
+    assert "查看当天完整日报" not in report.email_html
 
 
 def test_attribution_and_footer_close_the_email() -> None:

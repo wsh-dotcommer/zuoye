@@ -75,6 +75,19 @@ def test_payload_without_secret_has_no_signature() -> None:
     assert "sign" not in payload
 
 
+def test_payload_keeps_management_summary_and_online_link_at_top() -> None:
+    markdown = (
+        "# 王帅豪 智能日报\n\n"
+        "- 在线日报：[查看当天完整日报](https://example.com/reports/daily-report-2026-09-18.html)\n\n"
+        "## 管理摘要\n\n### 今日概览\n- 飞书任务：已完成 1 · 进行中 0"
+    )
+
+    content = lark_bot.build_payload(_report(markdown=markdown))["card"]["elements"][0]["text"]["content"]
+
+    assert content.index("在线日报") < content.index("管理摘要")
+    assert "daily-report-2026-09-18.html" in content
+
+
 def test_gen_sign_matches_official_algorithm() -> None:
     timestamp = 1700000000
     secret = "demo-secret"

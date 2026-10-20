@@ -120,6 +120,7 @@ def _run_pipeline(config: Config, args: argparse.Namespace, logger: JsonLineLogg
         feishu_tasks=feishu_tasks,
         source_refs=_source_refs(config, statuses) if config.report.attribution_enabled else (),
         attribution_scope=config.report.attribution_scope,
+        public_base_url=config.report.public_base_url,
     )
 
     outputs = _write_outputs(config, report)

@@ -210,10 +210,13 @@ def test_single_member_merges_team_line_and_skips_member_heading() -> None:
     )
 
     assert "- 团队：测试团队（@wsh-dotcommer）" in report.markdown
-    assert "\n## " not in report.markdown  # 单人时不再重复成员标题
+    assert "## 管理摘要" in report.markdown
+    assert "## 红豆" not in report.markdown  # 单人时不再重复成员标题
     assert "### 代码提交" in report.markdown
-    assert 'class="panel-heading"' not in report.html
-    assert "<h2>" not in report.html
+    assert report.html.count('class="panel-heading"') == 1
+    assert "Member · 成员日报" not in report.html
+    assert report.html.count("<h2") == 1  # 只有团队管理摘要，没有重复的成员标题
+    assert "<h2>红豆" not in report.html
 
 
 def test_two_members_keep_member_headings() -> None:
@@ -422,16 +425,21 @@ def _task_report(statuses=None, tasks=None):
 
 def test_feishu_task_section_lists_three_states() -> None:
     markdown = _task_report().markdown
+    section = markdown.split("### 任务进展 · 飞书任务（补跑快照）", 1)[1]
 
     assert "### 任务进展 · 飞书任务" in markdown
     assert "共 3 条：进行中 1 · 未开始 1 · 已完成 1" in markdown
     # 排序：进行中 → 未开始 → 已完成，同组按截止日期升序（无截止排最后）
-    doing = markdown.index("- ● 进行中 · 正在做的事（截止 2026-09-20）")
-    todo = markdown.index("- ○ 未开始 · 还没开始的事")
-    done = markdown.index("- ✓ 已完成 · 已经做完的事（截止 2026-09-15）")
+    doing = section.index("- ● 进行中 · 正在做的事（截止 2026-09-20）")
+    todo = section.index("- ○ 未开始 · 还没开始的事")
+    done = section.index("- ✓ 已完成 · 已经做完的事（截止 2026-09-15）")
     assert doing < todo < done
     # 小节的物理位置：挂在「任务进展」之后、「工时统计」之前
-    assert markdown.index("### 任务进展\n") < doing < markdown.index("### 工时统计")
+    assert (
+        markdown.index("### 任务进展\n")
+        < markdown.index("### 任务进展 · 飞书任务（补跑快照）")
+        < markdown.index("### 工时统计")
+    )
 
 
 def test_feishu_task_section_absent_when_source_not_enabled() -> None:
@@ -473,12 +481,13 @@ def test_feishu_task_section_marks_backfill_and_truncates() -> None:
         for index in range(25)
     ]
     markdown = _task_report(tasks=many).markdown
+    section = markdown.split("### 任务进展 · 飞书任务（补跑快照）", 1)[1]
 
     # 目标日期不是"今天"时显式标注补跑，避免被读成当天发生的流转
     assert "### 任务进展 · 飞书任务（补跑快照）" in markdown
     assert "共 25 条：进行中 25" in markdown
     assert "- …（其余 5 条见飞书任务）" in markdown
-    assert markdown.count("- ● 进行中 · 任务 ") == 20  # 最多列 FEISHU_TASK_LIMIT 条
+    assert section.count("- ● 进行中 · 任务 ") == 20  # 最多列 FEISHU_TASK_LIMIT 条
 
 
 def test_commit_html_uses_two_row_entries() -> None:
@@ -506,3 +515,147 @@ def test_commit_entries_omit_link_when_url_missing() -> None:
 
     assert '<span class="line-meta">abc1234 · ' in report.html
     assert "[abc1234](" not in report.html
+
+
+# ===== v2.8：团队级管理摘要 =====
+
+def _management_report(
+    tasks,
+    *,
+    public_base_url: str = "",
+    include_feishu: bool = True,
+    statuses=None,
+):
+    source_statuses = list(statuses if statuses is not None else STATUSES_OK)
+    if include_feishu:
+        source_statuses.append(SourceStatus(name=SOURCE_FEISHU_TASK, ok=True, count=len(tasks)))
+    return formatter.generate(
+        date(2026, 9, 18),
+        [MEMBERS[0]],
+        COMMITS,
+        TASKS,
+        MESSAGES,
+        source_statuses,
+        "测试团队",
+        feishu_tasks=tasks,
+        public_base_url=public_base_url,
+    )
+
+
+def test_management_summary_renders_overview_progress_and_all_channels() -> None:
+    tasks = [
+        FeishuTaskRecord(
+            guid="done",
+            summary="完成验收文档",
+            status="已完成",
+            due=date(2026, 9, 18),
+            completed_at=datetime(2026, 9, 18, 16, 0, tzinfo=timezone.utc),
+        ),
+        FeishuTaskRecord(
+            guid="doing",
+            summary="补齐集成测试",
+            status="进行中",
+            due=date(2026, 9, 20),
+            url="https://example.feishu.cn/task/doing",
+        ),
+    ]
+    report = _management_report(tasks)
+
+    assert "## 管理摘要" in report.markdown
+    assert "- 飞书任务：已完成 1 · 进行中 1 · 未开始 0 · 逾期 0" in report.markdown
+    assert "- GitHub 活动：提交 1 个（+120/-3，涉及文件 4 个） · Issue 完成 1 · 推进 0 · 互动 1 条" in report.markdown
+    progress = report.markdown.split("- 重点进展：", 1)[1].splitlines()[0]
+    assert progress.index("完成飞书任务 完成验收文档") < progress.index("完成 GitHub Issue")
+    assert progress.index("完成 GitHub Issue") < progress.index("提交 [abc1234]")
+    assert "管理摘要" in report.html and "管理摘要" in report.email_html
+    assert "补齐集成测试" in report.email_html
+
+
+def test_attention_uses_target_date_and_three_day_horizon() -> None:
+    tasks = [
+        FeishuTaskRecord(guid="overdue", summary="逾期任务", status="进行中", due=date(2026, 9, 17)),
+        FeishuTaskRecord(guid="today", summary="今天到期", status="未开始", due=date(2026, 9, 18)),
+        FeishuTaskRecord(guid="third", summary="第三天到期", status="进行中", due=date(2026, 9, 21)),
+        FeishuTaskRecord(guid="fourth", summary="第四天到期", status="进行中", due=date(2026, 9, 22)),
+        FeishuTaskRecord(guid="done", summary="已完成不算风险", status="已完成", due=date(2026, 9, 1)),
+    ]
+    markdown = _management_report(tasks).markdown
+    attention = markdown.split("### 需要关注", 1)[1].split("### 下一步", 1)[0]
+    next_steps = markdown.split("### 下一步", 1)[1].split("## 王帅豪", 1)[0]
+
+    assert attention.index("逾期任务") < attention.index("今天到期") < attention.index("第三天到期")
+    assert "逾期 1 天" in attention
+    assert "今天到期" in attention
+    assert "2026-09-21 到期" in attention
+    assert "第四天到期" not in attention
+    assert "已完成不算风险" not in attention
+    assert "第四天到期" in next_steps
+
+
+def test_attention_caps_five_tasks_and_next_steps_excludes_duplicates() -> None:
+    tasks = [
+        FeishuTaskRecord(
+            guid=f"urgent-{index}",
+            summary=f"临近任务 {index}",
+            status="进行中",
+            due=date(2026, 9, 14 + index),
+        )
+        for index in range(7)
+    ]
+    tasks.append(
+        FeishuTaskRecord(
+            guid="later",
+            summary="后续任务",
+            status="未开始",
+            due=date(2026, 9, 30),
+        )
+    )
+    markdown = _management_report(tasks).markdown
+    attention = markdown.split("### 需要关注", 1)[1].split("### 下一步", 1)[0]
+    next_steps = markdown.split("### 下一步", 1)[1].split("## 王帅豪", 1)[0]
+
+    assert attention.count("临近任务") == 5
+    assert "临近任务 5" not in attention
+    assert "后续任务" in next_steps
+
+
+def test_management_source_failure_is_always_reported() -> None:
+    report = _management_report([], include_feishu=False, statuses=STATUSES)
+
+    attention = report.markdown.split("### 需要关注", 1)[1].split("### 下一步", 1)[0]
+    # STATUSES 中协作沟通故意失败；即使所有任务正常，也必须进入需要关注。
+    assert "数据源异常：协作沟通（GitHub API 超时）" in attention
+    assert "暂无逾期或临近截止事项，所有数据源正常" not in report.markdown
+
+
+def test_management_empty_state_and_optional_online_url() -> None:
+    without_url = formatter.generate(
+        date(2026, 9, 18),
+        [MEMBERS[0]],
+        [],
+        [],
+        [],
+        STATUSES_OK,
+        "测试团队",
+    )
+    with_url = formatter.generate(
+        date(2026, 9, 18),
+        [MEMBERS[0]],
+        [],
+        [],
+        [],
+        STATUSES_OK,
+        "测试团队",
+        public_base_url="https://example.com/reports/",
+    )
+
+    assert "- 暂无逾期或临近截止事项，所有数据源正常" in without_url.markdown
+    assert "- 暂无其他未完成任务" in without_url.markdown
+    assert "在线日报" not in without_url.markdown
+    assert with_url.public_url == "https://example.com/reports/daily-report-2026-09-18.html"
+    assert (
+        "- 在线日报：[查看当天完整日报](https://example.com/reports/daily-report-2026-09-18.html)"
+        in with_url.markdown
+    )
+    assert 'href="https://example.com/reports/daily-report-2026-09-18.html"' in with_url.email_html
+    assert "查看当天完整日报" not in with_url.html  # 网页本身不再重复入口

@@ -133,6 +133,7 @@ class ReportConfig:
     site_title: str
     storage_path: Path
     log_path: Path
+    public_base_url: str = ""
     skip_weekends: bool = True
     holidays: tuple[date, ...] = ()
     workbench: bool = True
@@ -287,6 +288,7 @@ def load_config(
         site_title=str(report_raw.get("site_title", "智能日报")).strip() or "智能日报",
         storage_path=Path(str(report_raw.get("storage_path", "data/reports.sqlite3"))),
         log_path=Path(str(report_raw.get("log_path", "logs/daily-report.jsonl"))),
+        public_base_url=str(report_raw.get("public_base_url", "")).strip().rstrip("/"),
         skip_weekends=bool(report_raw.get("skip_weekends", True)),
         holidays=_parse_holidays(report_raw.get("holidays")),
         workbench=bool(report_raw.get("workbench", True)),

@@ -26,6 +26,44 @@
       <button class="button button-secondary" id="report-load" type="button">载入到工作台</button>
     </div>
 {% endif %}
+{% if view.management %}
+    <section class="panel management-panel" aria-labelledby="management-title">
+      <div class="panel-heading">
+        <div>
+          <p class="panel-kicker">Management · 团队摘要</p>
+          <h2 id="management-title">管理摘要</h2>
+        </div>
+        <span class="note-chip">先看进展，再看行动</span>
+      </div>
+      <section class="block management-block">
+        <h3>今日概览</h3>
+        <ul class="lines">
+{% for item in view.management.overview %}
+          <li>{{ item | inline_links }}</li>
+{% endfor %}
+{% if view.management.progress %}
+          <li><strong>重点进展：</strong>{{ view.management.progress | join("；") | inline_links }}</li>
+{% endif %}
+        </ul>
+      </section>
+      <section class="block management-block">
+        <h3>需要关注</h3>
+        <ul class="lines">
+{% for item in view.management.attention %}
+          <li>{{ item | inline_links }}</li>
+{% endfor %}
+        </ul>
+      </section>
+      <section class="block management-block">
+        <h3>下一步</h3>
+        <ul class="lines">
+{% for item in view.management.next_steps %}
+          <li>{{ item | inline_links }}</li>
+{% endfor %}
+        </ul>
+      </section>
+    </section>
+{% endif %}
 {% for member in view.members %}
     <section class="panel">
 {% if not view.single_member %}

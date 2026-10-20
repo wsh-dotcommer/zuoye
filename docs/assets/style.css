@@ -210,6 +210,13 @@ h3 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .01em; }
 .block-sub { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e6ece8; }
 h4 { margin: 0; font-size: 13.5px; font-weight: 680; color: var(--ink-soft); }
 
+/* v2.8：团队级管理摘要 */
+.management-panel { border-color: #cfe3d9; background: linear-gradient(180deg, #fbfdfc 0%, var(--surface) 42%); }
+.management-panel .panel-heading { margin-bottom: 8px; }
+.management-block { margin-top: 14px; padding-top: 14px; }
+.management-block .lines { margin-top: 7px; }
+.management-block .lines li { margin: 5px 0; }
+
 /* v2.4：提交行两行制——主行放提交信息，元信息行放短号与变更统计 */
 .line-entry { margin: 6px 0; }
 .line-main { display: block; }

@@ -46,6 +46,8 @@ def test_render_site_writes_expected_files(tmp_path: Path) -> None:
     assert "2026-09-18" in index
     assert "1 名成员" in index
     assert "← 返回日报列表" in detail
+    assert "管理摘要" in detail
+    assert "今日概览" in detail and "需要关注" in detail and "下一步" in detail
     # v2.0：Markdown 原文作为工作台载荷内联在页面末尾的脚本里，
     # 因此这里只检查正文区域不残留 Markdown 标记。
     assert "### " not in detail.split('<script id="workbench-data"', 1)[0]

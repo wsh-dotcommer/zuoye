@@ -1,6 +1,6 @@
 # 智能日报生成器 — 架构设计
 
-规范版本：v2.7（与 `specs/proposal.md` v2.7 对应）
+规范版本：v2.8（与 `specs/proposal.md` v2.8 对应）
 
 ## 变更记录
 
@@ -23,6 +23,7 @@
 | v2.5.2 | 需求澄清（起点为代码，逆向回溯更新本文件） | 飞书任务小节从"全量快照"收紧为"当天仍有意义"：新增 `FeishuTaskRecord.completed_at`，采集层在映射后隐藏"状态=已完成且完成时间早于采集窗口起点"的记录（窗口起点即日报目标日 00:00，补跑按那天算；`start` 为空或任务缺完成时间时不过滤），并记 `feishu_tasks_filtered` 日志；小节为空时文案改为「今日无飞书任务」。展示口径调整，故 `proposal.md` 与 `tasks.md` 不升版 |
 | v2.6 | 缺陷修复（起点为代码，逆向回溯更新本文件） | 邮件在 PC 与手机渲染不一致、页头「日」图标消失：根因是邮件正文直接复用站点页面，依赖 9KB `<style>`、103 处 `var(--…)` 与 flex，而 QQ 邮箱 PC 端会丢弃依赖 CSS 变量的声明（白字落在透明背景上）。新增邮件专用模板 `generator/templates/email.html.j2` 与 `template.render_email_html(view)`（表格布局 + 全内联字面量样式，不含 `<style>`/class/`var()`/flex/grid/clamp），`DailyReport` 增加 `email_html`，推送层优先使用它（为空回退站点版）；`main.py` 另存 `output/daily-report-<date>.email.html` 便于排查；`inline_links` 过滤器支持传入内联链接颜色。站点页面与飞书卡片渲染不变，故 `proposal.md` 与 `tasks.md` 不升版 |
 | v2.7 | 需求变更（由 proposal.md v2.7 传导） | 工时口径从"提交时间"扩到"活动时间"：`derive()` 新增仅关键字参数 `tasks` / `messages`，三类活动归一成一条活动流后仍走会话法；`WorkHoursRecord` 增加 `task_count` / `comment_count`（`commit_count` 语义不变）与 `activity_count`，`detail` 改为"提交 x · 任务 y · 评论 z，N 个工作段"（只列非零）；`WORK_HOURS_NOTE` 改为"按提交/任务/评论时间推导，非真实考勤"；`formatter._derive_work_hours()` 按 `SourceStatus` 过滤失败源，并把"提交源失败即全员不可用"放宽为"三个活动源全部失败才不可用"（§4.2/§6.4）。`tasks.md` 新增 Task 22 |
+| v2.8 | 需求变更（由 proposal.md v2.8 传导） | `build_view()` 新增团队级 `management` 摘要（今日概览 / 需要关注 / 下一步）并在 Markdown、站点、邮件、飞书卡片中复用；`DailyReport` 新增 `public_url`，配置新增可选 `report.public_base_url`，用于生成当天详情页入口；邮件模板继续只使用表格与内联字面量样式。新增 ADR-014，`tasks.md` 新增 Task 23 |
 
 ## 1. 系统架构
 
@@ -138,6 +139,8 @@
 | generated_at | datetime | 生成时间 |
 | markdown | str | 完整的 Markdown 格式日报 |
 | html | str | 完整的 HTML 格式日报 |
+| email_html | str | 邮件专用 HTML（v2.6 新增） |
+| public_url | str | 当天在线日报详情页 URL（v2.8 新增；未配置 `report.public_base_url` 时为空串） |
 | source_statuses | list[SourceStatus] | 各数据源采集状态（本期新增，用于"数据获取失败"标注与推送决策） |
 | total_hours | float | 团队总工时（v1.1 新增；等于各成员工时之和） |
 | member_count | int | 参与统计的成员数（v1.1 新增；用于计算人均） |
@@ -256,6 +259,7 @@ generate(
     recent: Sequence[ReportStats] = (), chat_summaries: Sequence[ChatSummaryRecord] = (),   # v2.3
     feishu_tasks: Sequence[FeishuTaskRecord] = (), source_refs: Sequence[DataSourceRef] = (),
     attribution_scope: str = "",                                                            # v2.4
+    public_base_url: str = "",                                                               # v2.8
 ) -> DailyReport
 ```
 
@@ -278,6 +282,11 @@ generate(
 - 头部补充行（v2.3）：在「工时」行之后按顺序追加三行可选项，空的不出现——①`- 飞书群：群名 N 条 · M 人发言`（多群用 `；` 连接）；②`- 对比上期（YYYY-MM-DD）：提交 ±N · 任务 ±N · 沟通 ±N · 工时 ±N.Nh`，基数取 `recent[-1]`（最近一期已保存日报），其日期不早于当日或无历史时整行不出现；③`- 近 N 期：提交 ▁▂▃█（合计条数）· 工时 ▁▂▃█（合计小时）`，序列 = `recent` 末尾 6 期 + 当日本期，不足 2 期不出现。三行在 Markdown 与 HTML 中共用 `build_view()["extra_lines"]`，因此邮件正文与飞书卡片自动一致。
 - 迷你趋势字符（v2.3）：8 档块字符 `▁▂▃▄▅▆▇█` 按 `value / max(values)` 归一化取档；最大值 ≤ 0 时全部取最低档（不虚高）；差值文本用 `±0` 表示零、负值带 `-`、工时带 `h` 后缀并沿用 `_format_hours` 的去尾零规则。
 - 日报头部增加汇总行：`工时：团队合计 X.Xh · 人均 Y.Yh（按提交/任务/评论时间推导，非真实考勤）`，人均 = 合计 ÷ 成员数。
+- 团队管理摘要（v2.8）：`build_view()["management"]` 包含 `overview` / `progress` / `attention` / `next_steps` / `online_url`，三端共用。
+  - **今日概览**：有飞书任务源时输出 `已完成 / 进行中 / 未开始 / 逾期`；GitHub 行输出提交数、增删行数、涉及文件数、Issue 完成/推进数、互动数。重点进展最多 3 条，顺序固定为当天完成飞书任务 → 完成 GitHub Issue → 最新提交。
+  - **需要关注**：未完成飞书任务中，截止日期 `<= 目标日 + 3 天` 的进入列表（包括全部已逾期），按截止日期升序，最多 5 条；所有失败数据源（`SourceStatus.ok == False`）始终追加。无任务风险且无源失败时输出“暂无逾期或临近截止事项，所有数据源正常”。
+  - **下一步**：进行中和未开始的飞书任务按 `进行中 → 未开始`、截止日期升序取最多 3 条；排除已经在“需要关注”中展示的任务，避免重复。
+  - `public_base_url` 末尾斜杠自动归一，生成 `<base>/daily-report-YYYY-MM-DD.html`；为空时 `online_url` 为空，Markdown/邮件/飞书都不显示入口。站点详情页自身不重复展示入口。
 
 工时推导契约（v1.1 新增，v2.7 口径扩展；纯计算，不访问网络）：
 
@@ -560,6 +569,24 @@ check(target: LarkBotTarget) -> tuple[bool, str]      # v1.2
 **理由**：1）三类痕迹都来自已经采集的数据，新增零成本、零权限；2）会话法的"间隔切段"天然适配稀疏的活动点，不需要引入新的度量模型；3）口径变更**不回溯历史**——已生成的日报保持不变，趋势与「对比上期」出现的一次性跳变是可解释的，好过悄悄改写历史数字。
 
 **代价与约束**：工时数字普遍变大，活跃日更容易触到 12h 上限；一次评论与一次提交在算法里权重相同（都是"一个时间点"），这是有意的简化——本项目的工时只用于观察节奏，不作考核（§6.4）。
+
+### ADR-014：管理摘要用确定性规则生成，不调用 AI（v2.8）
+
+**背景**：日报已有详细板块，但读者仍需自己判断“今天完成了什么、哪里要处理、接下来做什么”。直接在模板里堆更多明细并不能解决决策成本，而引入大模型摘要会增加密钥、费用、网络依赖和内容外发风险。
+
+**选项对比**：
+
+| 方案 | 优点 | 代价 |
+| --- | --- | --- |
+| 不做摘要 | 实现零成本 | 邮件继续是流水账，管理动作靠人工归纳 |
+| 调用大模型生成自然语言摘要 | 文案自然 | 需要新凭据与费用；网络失败影响主流程；任务/评论数据外发给第三方 |
+| 用已有数据做确定性规则摘要 | 免费、离线可测、结果可解释；不增加请求与隐私面 | 文案较固定，不能表达复杂语义 |
+
+**决策**：生成团队级「今日概览 / 需要关注 / 下一步」三块，只使用本次已采集的提交、Issue、评论、飞书任务与 `SourceStatus`。重点进展最多 3 条，风险任务使用目标日 + 3 天边界，下一步最多 3 条并与风险列表去重。摘要进入共享 `view`，三端同步。
+
+**理由**：1）管理信息主要来自计数、状态与截止日期，这些数据适合规则计算；2）结果可测试、可复现，同一输入永远得到同一输出；3）不新增外部依赖，符合本地静态生成器的约束。
+
+**代价与约束**：摘要不是语义总结，不会自动提炼复杂项目背景；当数据源缺失时只能明确报告异常，不能用推测补齐。未来若要 AI 摘要，必须作为独立可选功能重新评审隐私与失败降级。
 
 ## 6. 非功能性约束
 
