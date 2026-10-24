@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from generator import formatter
+from notifier import lark_bot
 from shared.config import MemberConfig
 from shared.models import (
     SOURCE_COMMIT,
@@ -134,12 +135,45 @@ def test_source_chips_use_literal_colors() -> None:
     assert "color:#a53939" in failed
 
 
-def test_commit_entries_render_as_two_rows() -> None:
+def test_commit_summary_uses_inline_tables_and_omits_commit_details() -> None:
     html = _full_report().email_html
+    section = html.split(">代码提交</td>", 1)[1].split(">任务进展</td>", 1)[0]
 
-    assert "<div>octo/demo feat: 新增静态日报站</div>" in html
-    assert '<div style="color:#697770;font-size:12.5px;">' in html
-    assert "abc1234" in html
+    assert 'cellspacing="6"' in section
+    assert "提交次数" in section and "涉及文件" in section
+    assert "新增行" in section and "删除行" in section
+    assert "改动构成" in section and "仓库分布" in section
+    assert "功能 1" in section
+    assert "octo/demo · 1 次" in section
+    assert "background-color:#176b5b" in section
+    assert "feat: 新增静态日报站" not in section
+    assert "abc1234" not in section
+    assert "a.py" not in section
+
+
+def test_commit_summary_is_shared_by_markdown_and_lark() -> None:
+    report = _full_report()
+    lark_content = lark_bot.build_payload(report)["card"]["elements"][0]["text"]["content"]
+    commit_section = report.markdown.split("### 代码提交", 1)[1].split("### 任务进展", 1)[0]
+
+    assert "- 概况：共 1 次提交 · 1 个仓库 · 2 个文件 · +120/-3 行" in commit_section
+    assert "- 改动构成：功能 1" in commit_section
+    assert commit_section in lark_content
+    assert "abc1234" not in commit_section
+
+
+def test_collaboration_module_is_omitted_from_markdown_site_and_email() -> None:
+    report = _full_report()
+    lark_content = lark_bot.build_payload(report)["card"]["elements"][0]["text"]["content"]
+
+    assert "### 协作沟通" not in report.markdown
+    assert "### 协作沟通" not in lark_content
+    assert "<h3>协作沟通</h3>" not in report.html
+    assert "<h3>协作沟通</h3>" not in report.email_html
+    assert "这里建议补测试" not in report.markdown
+    assert "这里建议补测试" not in report.html
+    assert "这里建议补测试" not in report.email_html
+    assert "协作沟通 1 条" in report.email_html
 
 
 def test_links_carry_inline_color() -> None:
@@ -156,8 +190,8 @@ def test_section_states_render_like_detail_page() -> None:
     # 两个以上空板块合并成一行
     assert "部分板块无记录" in html
     assert "代码提交、任务进展" in html
-    # 失败板块带自己的配色
-    assert "数据获取失败（GitHub API 超时）" in html
+    # 评论源失败不再生成独立板块，但管理摘要仍给出完整告警
+    assert "数据源异常：协作沟通（GitHub API 超时）" in html
     assert "background-color:#fff1ef" in html
 
 

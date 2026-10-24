@@ -232,18 +232,21 @@ def test_full_pipeline_generates_report_and_site(tmp_path: Path, monkeypatch) ->
     assert "### 代码提交" in markdown
     assert "### 任务进展" in markdown
     assert "### 工时统计" in markdown
-    assert "### 协作沟通" in markdown
-    assert markdown.index("### 任务进展") < markdown.index("### 工时统计") < markdown.index("### 协作沟通")
+    assert "### 协作沟通" not in markdown
+    assert markdown.index("### 任务进展") < markdown.index("### 工时统计")
     # v2.7：工时按活动时间推导（红豆 05:00 任务 + 06:00 评论 + 10:00 提交 → 2 段；张三 11:00 提交 → 1 段）
     assert "- 工时：团队合计 2.5h · 人均 1.25h（按提交/任务/评论时间推导，非真实考勤）" in markdown
     assert "- 工时：2h（提交 1 · 任务 1 · 评论 1，2 个工作段）" in markdown
     assert "## 红豆（wsh-dotcommer）" in markdown
     assert "静态日报站上线：进行中 → 已完成" in markdown
-    assert "feat: 索引页已经可以点击跳转" in markdown
+    assert "互动 1 条" in markdown
+    assert "- 概况：共" in markdown
     assert "<h3>代码提交</h3>" in html
+    assert 'class="commit-summary"' in html
     assert "<h3>工时统计</h3>" in html
     assert f'href="daily-report-{DAY}.html"' in index
     assert "← 返回日报列表" in detail
+    assert 'class="commit-summary"' in detail
     assert "工时统计" in detail
     assert (tmp_path / "docs" / "assets" / "style.css").exists()
     assert (tmp_path / "docs" / ".nojekyll").exists()
@@ -274,7 +277,7 @@ def test_degraded_source_is_marked_and_others_survive(tmp_path: Path, monkeypatc
     assert exit_code == 0
     markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
     assert "数据获取失败" in markdown
-    assert "feat: 索引页已经可以点击跳转" in markdown
+    assert "互动 1 条" in markdown
     assert "### 代码提交" in markdown
     assert "### 工时统计" in markdown
 
@@ -294,7 +297,7 @@ def test_empty_data_shows_placeholder(tmp_path: Path, monkeypatch) -> None:
     markdown = (tmp_path / "output" / f"daily-report-{DAY}.md").read_text(encoding="utf-8")
     # v2.4：每位成员的空板块合并成一行，因此每人只剩一条合并占位
     assert markdown.count("### 部分板块无记录") == 2
-    assert "- 代码提交、任务进展、协作沟通" in markdown
+    assert "- 代码提交、任务进展" in markdown
     assert "- 0h（今日无记录）" in markdown
     assert "- 工时：团队合计 0h · 人均 0h" in markdown
 
@@ -318,8 +321,8 @@ def test_hours_unavailable_when_commits_fail(tmp_path: Path, monkeypatch) -> Non
     assert "- 工时：1.5h（任务 1 · 评论 1，1 个工作段）" in markdown
     assert "工时数据不可用" not in markdown
     assert "数据获取失败" in markdown  # 提交板块如实标注
-    assert "### 协作沟通" in markdown
-    assert "feat: 索引页已经可以点击跳转" in markdown
+    assert "### 协作沟通" not in markdown
+    assert "互动 1 条" in markdown
 
 
 def test_all_sources_failed_does_not_write_report(tmp_path: Path, monkeypatch) -> None:

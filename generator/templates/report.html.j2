@@ -84,26 +84,68 @@
           <h3>{{ section.title }}</h3>
 {% endif %}
 {% if section.state == "ok" and section.title != "工时统计" %}
-          <span class="block-meta">{{ section.lines|length }} 条</span>
+          <span class="block-meta">{{ section.count if section.count is defined else section.lines|length }} 条</span>
 {% endif %}
         </div>
 {% if section.state == "ok" %}
-        <ul class="lines">
-{% if section.entries %}
-{% for item in section.entries %}
-          <li class="line-entry">
-            <span class="line-main">{{ item.main | inline_links }}</span>
-{% if item.meta %}
-            <span class="line-meta">{{ item.meta | inline_links }}</span>
+{% if section.summary and section.key == "commits" %}
+        <div class="commit-summary">
+          <div class="commit-metrics">
+            <div class="commit-metric">
+              <span class="commit-metric-label">提交次数</span>
+              <strong class="commit-metric-value">{{ section.summary.count }}<small>次</small></strong>
+            </div>
+            <div class="commit-metric">
+              <span class="commit-metric-label">涉及文件</span>
+              <strong class="commit-metric-value">{{ section.summary.file_count }}<small>个</small></strong>
+            </div>
+            <div class="commit-metric commit-metric-add">
+              <span class="commit-metric-label">新增行</span>
+              <strong class="commit-metric-value">+{{ section.summary.additions }}</strong>
+            </div>
+            <div class="commit-metric commit-metric-delete">
+              <span class="commit-metric-label">删除行</span>
+              <strong class="commit-metric-value">-{{ section.summary.deletions }}</strong>
+            </div>
+          </div>
+{% if section.summary.change_total %}
+          <div class="commit-change">
+            <div class="commit-change-head">
+              <span>增删构成</span>
+              <span>共 {{ section.summary.change_total }} 行</span>
+            </div>
+            <div class="commit-change-track" role="img" aria-label="新增 {{ section.summary.additions }} 行，删除 {{ section.summary.deletions }} 行">
+              <span class="commit-change-add" style="width: {{ section.summary.additions_percent }}%"></span>
+              <span class="commit-change-delete" style="width: {{ section.summary.deletions_percent }}%"></span>
+            </div>
+          </div>
 {% endif %}
-          </li>
+          <div class="commit-breakdown">
+            <div class="commit-group">
+              <span class="commit-group-label">改动构成</span>
+              <div class="commit-tags">
+{% for item in section.summary.types %}
+                <span class="commit-tag">{{ item.label }} <b>{{ item.count }}</b></span>
 {% endfor %}
+              </div>
+            </div>
+            <div class="commit-group">
+              <span class="commit-group-label">仓库分布</span>
+              <div class="commit-tags">
+{% for item in section.summary.repos %}
+                <span class="commit-tag commit-repo-tag">{{ item.name }} <b>{{ item.count }} 次</b></span>
+{% endfor %}
+              </div>
+            </div>
+          </div>
+        </div>
 {% else %}
+        <ul class="lines">
 {% for item in section.lines %}
           <li>{{ (item[2:] if item.startswith("- ") else item) | inline_links }}</li>
 {% endfor %}
-{% endif %}
         </ul>
+{% endif %}
 {% elif section.state == "empty" %}
 {% if section.merged %}
         <p class="empty-line">{{ section.note }}</p>

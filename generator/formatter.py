@@ -36,14 +36,27 @@ from shared.models import (
     WORK_HOURS_NOTE,
 )
 
-CONTENT_PREVIEW_LIMIT = 140
-COMMIT_FILE_LIMIT = 10
-SHA_LENGTH = 7
 TREND_POINTS = 7
 TREND_MIN_POINTS = 3  # v2.4：少于 3 期看不出趋势，且两期合计容易被误读成当日数据
 SPARK_BARS = "▁▂▃▄▅▆▇█"
+SHA_LENGTH = 7
 EMPTY_NOTE = "今日无记录"
 FAILED_LABEL = "数据获取失败"
+COMMIT_TYPE_ORDER = ("功能", "修复", "文档", "测试", "重构", "工程维护", "其他")
+COMMIT_TYPE_BY_PREFIX = {
+    "feat": "功能",
+    "fix": "修复",
+    "docs": "文档",
+    "doc": "文档",
+    "test": "测试",
+    "tests": "测试",
+    "refactor": "重构",
+    "chore": "工程维护",
+    "build": "工程维护",
+    "ci": "工程维护",
+    "perf": "工程维护",
+    "style": "工程维护",
+}
 
 # v2.4：数据来源标注
 ATTRIBUTION_SEPARATOR = " ｜ "
@@ -74,7 +87,7 @@ ATTENTION_OK_NOTE = "暂无逾期或临近截止事项，所有数据源正常"
 NEXT_STEP_EMPTY_NOTE = "暂无其他未完成任务"
 
 # v2.4：内容板块为空时的合并规则（工时统计与飞书任务各自带口径，不参与合并）
-MERGEABLE_SECTION_KEYS = ("commits", "tasks", "messages")
+MERGEABLE_SECTION_KEYS = ("commits", "tasks")
 MERGE_EMPTY_MIN = 2
 MERGED_EMPTY_TITLE = "部分板块无记录"
 
@@ -88,7 +101,6 @@ SECTION_TITLES = {
     "commits": "代码提交",
     "tasks": "任务进展",
     "hours": "工时统计",
-    "messages": "协作沟通",
 }
 
 
@@ -222,14 +234,16 @@ def _member_sections(
     *,
     feishu_task_section: dict | None = None,
 ) -> list[dict]:
-    """成员段落固定顺序：代码提交 → 任务进展（含飞书任务子小节）→ 工时统计 → 协作沟通。"""
+    """成员段落固定顺序：代码提交 → 任务进展（含飞书任务子小节）→ 工时统计。"""
 
+    commit_summary = _commit_summary(member.commits)
     sections = [
         _section(
             "commits",
-            _commit_items(member.commits),
+            commit_summary["lines"],
             statuses.get(SOURCE_COMMIT),
-            entries=_commit_entries(member.commits),
+            count=len(member.commits),
+            summary=commit_summary,
         ),
         _section("tasks", _task_items(member.tasks, member), statuses.get(SOURCE_ISSUE)),
     ]
@@ -238,20 +252,13 @@ def _member_sections(
     hours_section = _hours_section(member)
     if hours_section is not None:
         sections.append(hours_section)
-    sections.append(
-        _section(
-            "messages",
-            _message_items(member.messages),
-            statuses.get(SOURCE_DISCUSSION),
-        )
-    )
     return _merge_empty_sections(sections)
 
 
 def _merge_empty_sections(sections: list[dict]) -> list[dict]:
     """v2.4：同一次日报里空板块 ≥ 2 个时合并成一行，避免半屏都是"今日无记录"。
 
-    只合并内容板块（代码提交 / 任务进展 / 协作沟通）；工时统计与飞书任务
+    只合并内容板块（代码提交 / 任务进展）；工时统计与飞书任务
     各自带口径说明，仍按原样呈现。合并后的板块留在第一个空板块的位置，
     其余空板块移除，有内容的板块顺序不变。
     """
@@ -269,7 +276,6 @@ def _merge_empty_sections(sections: list[dict]) -> list[dict]:
         "title": MERGED_EMPTY_TITLE,
         "state": "empty",
         "lines": [],
-        "entries": [],
         "note": "、".join(empty_titles),
         "merged": True,
     }
@@ -705,16 +711,22 @@ def _section(
     items: list[str],
     status: SourceStatus | None,
     *,
-    entries: list[dict] | None = None,
+    count: int | None = None,
+    summary: dict | None = None,
 ) -> dict:
-    """构造一个板块视图；`lines` 给 Markdown/飞书，`entries` 给 HTML 的两行布局。"""
+    """构造一个板块视图；`lines` 给 Markdown/飞书，`summary` 给结构化 HTML。"""
 
     title = SECTION_TITLES[key]
-    base = {"key": key, "title": title, "entries": entries or []}
+    base = {
+        "key": key,
+        "title": title,
+        "count": len(items) if count is None else count,
+        "summary": summary,
+    }
     if status is not None and not status.ok:
         reason = status.error or "未知原因"
         return {**base, "state": "failed", "lines": [], "note": f"{FAILED_LABEL}（{reason}）"}
-    if not items:
+    if (count is not None and count <= 0) or not items:
         return {**base, "state": "empty", "lines": [], "note": EMPTY_NOTE}
     return {**base, "state": "ok", "lines": items, "note": ""}
 
@@ -740,7 +752,7 @@ def _feishu_task_section(
     title = FEISHU_TASK_TITLE
     if report_date != generated_at.date():
         title += "（补跑快照）"
-    base = {"key": SOURCE_FEISHU_TASK, "title": title, "sub": True, "entries": []}
+    base = {"key": SOURCE_FEISHU_TASK, "title": title, "sub": True}
 
     if not status.ok:
         reason = status.error or "未知原因"
@@ -793,7 +805,6 @@ def _hours_section(member: MemberReport) -> dict | None:
             "title": title,
             "state": "failed",
             "lines": [],
-            "entries": [],
             "note": f"工时数据不可用（{record.detail or '未知原因'}）",
         }
     if record.state == HOURS_EMPTY:
@@ -802,7 +813,6 @@ def _hours_section(member: MemberReport) -> dict | None:
             "title": title,
             "state": "empty",
             "lines": [],
-            "entries": [],
             "note": f"0h（{EMPTY_NOTE}）",
         }
     return {
@@ -810,7 +820,6 @@ def _hours_section(member: MemberReport) -> dict | None:
         "title": title,
         "state": "ok",
         "lines": [f"- 工时：{_format_hours(record.hours)}h（{record.detail}）"],
-        "entries": [],
         "note": "",
     }
 
@@ -871,64 +880,93 @@ def _format_hours(value: float) -> str:
     return text or "0"
 
 
-def _commit_items(commits: Sequence[CommitRecord]) -> list[str]:
-    return [
-        f"- `{record.repo}` {_commit_link(record)}{record.message or '(无提交信息)'}{_commit_stats(record)}"
-        for record in commits
-    ]
+def _commit_summary(commits: Sequence[CommitRecord]) -> dict:
+    """把一组提交压缩为面向日报读者的聚合概况。"""
 
+    additions = sum(record.additions for record in commits)
+    deletions = sum(record.deletions for record in commits)
+    files: set[str] = set()
+    unnamed_file_changes = 0
+    repo_counts: dict[str, int] = {}
+    type_counts = {label: 0 for label in COMMIT_TYPE_ORDER}
 
-def _commit_entries(commits: Sequence[CommitRecord]) -> list[dict]:
-    """提交行的 HTML 两行布局（v2.4）。
-
-    主行放"仓库 + 提交信息"，元信息行放短号链接 + 变更统计；这样手机端不会
-    把一条提交折成三行。Markdown/飞书仍用单行（`lines`），形态不变。
-    """
-
-    entries: list[dict] = []
     for record in commits:
-        short = (record.sha or "").strip()[:SHA_LENGTH]
-        meta: list[str] = []
-        if short:
-            meta.append(f"[{short}]({record.url})" if record.url else short)
-        meta.append(_commit_stats_text(record))
-        entries.append(
-            {
-                "main": f"{record.repo} {record.message or '(无提交信息)'}".strip(),
-                "meta": " · ".join(meta),
-            }
-        )
-    return entries
+        if record.files:
+            files.update(record.files)
+        else:
+            unnamed_file_changes += record.files_changed
+        repo = record.repo or "未知仓库"
+        repo_counts[repo] = repo_counts.get(repo, 0) + 1
+        type_counts[_commit_type(record.message)] += 1
 
-
-def _commit_link(record: CommitRecord) -> str:
-    """提交短号 + 链接；SHA 缺失时整段省略，不留空壳。"""
-
-    short = (record.sha or "").strip()[:SHA_LENGTH]
-    if not short:
-        return ""
-    if record.url:
-        return f"[{short}]({record.url}) "
-    return f"{short} "
-
-
-def _commit_stats(record: CommitRecord) -> str:
-    """提交行的变更统计；有文件名时在数量后列出（最多 COMMIT_FILE_LIMIT 个，超出以 `…` 结尾）。
-
-    文件名缺失（未取详情统计、详情请求失败）时退回只报数量的旧格式，不出现空冒号。
-    """
-
-    return f"（{_commit_stats_text(record)}）"
-
-
-def _commit_stats_text(record: CommitRecord) -> str:
-    summary = f"+{record.additions}/-{record.deletions}，{record.files_changed} 个文件"
-    if record.files:
-        shown = "、".join(record.files[:COMMIT_FILE_LIMIT])
-        if len(record.files) > COMMIT_FILE_LIMIT:
-            shown += "、…"
-        summary += f"：{shown}"
+    file_count = len(files) + unnamed_file_changes
+    repos = [
+        {"name": name, "count": count}
+        for name, count in sorted(repo_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    types = [
+        {"label": label, "count": type_counts[label]}
+        for label in COMMIT_TYPE_ORDER
+        if type_counts[label]
+    ]
+    change_total = additions + deletions
+    additions_percent, deletions_percent = _change_percentages(additions, deletions)
+    summary = {
+        "count": len(commits),
+        "repo_count": len(repo_counts),
+        "file_count": file_count,
+        "additions": additions,
+        "deletions": deletions,
+        "change_total": change_total,
+        "additions_percent": additions_percent,
+        "deletions_percent": deletions_percent,
+        "repos": repos,
+        "types": types,
+    }
+    summary["lines"] = _commit_summary_lines(summary)
     return summary
+
+
+def _commit_type(message: str) -> str:
+    """按 Conventional Commits 前缀归类；没有明确前缀的提交归入“其他”。"""
+
+    text = (message or "").strip().lower()
+    prefix = text.split(":", 1)[0].split("(", 1)[0].strip()
+    return COMMIT_TYPE_BY_PREFIX.get(prefix, "其他")
+
+
+def _change_percentages(additions: int, deletions: int) -> tuple[int, int]:
+    """计算增删比例条的整数宽度；两项都存在时保证两端各占至少 1%。"""
+
+    total = additions + deletions
+    if total <= 0:
+        return 0, 0
+    addition_percent = round(additions * 100 / total)
+    if additions and deletions:
+        addition_percent = min(99, max(1, addition_percent))
+    else:
+        addition_percent = 100 if additions else 0
+    return addition_percent, 100 - addition_percent
+
+
+def _commit_summary_lines(summary: dict) -> list[str]:
+    """Markdown/飞书使用的三行概况，不展开任何单条提交。"""
+
+    lines = [
+        f"- 概况：共 {summary['count']} 次提交 · {summary['repo_count']} 个仓库"
+        f" · {summary['file_count']} 个文件 · +{summary['additions']}/-{summary['deletions']} 行"
+    ]
+    if summary["types"]:
+        lines.append(
+            "- 改动构成："
+            + " · ".join(f"{item['label']} {item['count']}" for item in summary["types"])
+        )
+    if summary["repos"]:
+        lines.append(
+            "- 仓库分布："
+            + " · ".join(f"{item['name']} {item['count']} 次" for item in summary["repos"])
+        )
+    return lines
 
 
 def _task_items(tasks: Sequence[TaskRecord], member: MemberReport) -> list[str]:
@@ -961,27 +999,6 @@ def _task_context(record: TaskRecord, member: MemberReport) -> str:
     if record.comment_count > 0:
         parts.append(f"{record.comment_count} 条评论")
     return f"（{' · '.join(parts)}）" if parts else ""
-
-
-def _message_items(messages: Sequence[MessageRecord]) -> list[str]:
-    return [
-        f"- {_message_source(record)} {record.sender}：{_preview(record.content)}"
-        for record in messages
-    ]
-
-
-def _message_source(record: MessageRecord) -> str:
-    """讨论来源：有链接时输出 Markdown 链接（HTML 侧由 inline_links 过滤器转成 <a>）。"""
-
-    label = record.source or "(未知来源)"
-    return f"[{label}]({record.url})" if record.url else f"[{label}]"
-
-
-def _preview(content: str) -> str:
-    text = " ".join((content or "").split())
-    if len(text) <= CONTENT_PREVIEW_LIMIT:
-        return text
-    return text[:CONTENT_PREVIEW_LIMIT] + "…"
 
 
 def _format_moment(moment: datetime) -> str:

@@ -79,7 +79,7 @@ def _report():
     return formatter.generate(date(2026, 9, 18), MEMBERS, COMMITS, TASKS, MESSAGES, STATUSES, "测试团队")
 
 
-def test_markdown_contains_three_sections() -> None:
+def test_markdown_contains_rendered_member_sections() -> None:
     report = _report()
     markdown = report.markdown
 
@@ -94,25 +94,30 @@ def test_markdown_contains_three_sections() -> None:
     assert "### 代码提交" in markdown
     assert "### 任务进展" in markdown
     assert "### 工时统计" in markdown
-    assert "### 协作沟通" in markdown
-    assert "feat: 新增静态日报站（+120/-3，4 个文件：a.py、b.py、c.py、d.py）" in markdown
+    assert "### 协作沟通" not in markdown
+    commit_section = markdown.split("### 代码提交", 1)[1].split("### 任务进展", 1)[0]
+    assert "- 概况：共 1 次提交 · 1 个仓库 · 4 个文件 · +120/-3 行" in commit_section
+    assert "- 改动构成：功能 1" in commit_section
+    assert "- 仓库分布：octo/demo 1 次" in commit_section
+    assert "feat: 新增静态日报站" not in commit_section
+    assert "abc1234" not in commit_section
+    assert "a.py" not in commit_section
     assert "补齐集成测试：进行中 → 已完成" in markdown
     assert "代码提交 1 条" in markdown
     assert "协作沟通 数据获取失败" in markdown
-    assert "- `octo/demo` [abc1234](https://github.com/octo/demo/commit/abc1234def) " in markdown
     assert "- [#7](https://github.com/octo/demo/issues/7) 补齐集成测试：进行中 → 已完成（标签：日报 · 2 条评论）" in markdown
     assert "指派：" not in markdown  # 指派人与本段成员一致时不重复写名字
 
 
-def test_message_source_is_linked_when_discussion_available() -> None:
+def test_discussion_module_is_omitted_but_source_count_is_preserved() -> None:
     markdown = formatter.generate(
         date(2026, 9, 18), MEMBERS, COMMITS, TASKS, MESSAGES, STATUSES_OK, "测试团队"
     ).markdown
 
-    assert (
-        "- [octo/demo PR #7](https://github.com/octo/demo/pull/7#discussion_r1) wsh-dotcommer："
-        in markdown
-    )
+    assert "### 协作沟通" not in markdown
+    assert "octo/demo PR #7" not in markdown
+    assert "协作沟通 1 条" in markdown
+    assert "互动 1 条" in markdown
 
 
 def test_html_renders_inline_links_as_anchors() -> None:
@@ -228,35 +233,62 @@ def test_two_members_keep_member_headings() -> None:
     assert 'class="panel-heading"' in report.html
 
 
-def test_commit_files_are_truncated_to_limit() -> None:
-    files = tuple(f"file-{index}.py" for index in range(11))
-    commits = [replace(COMMITS[0], files=files, files_changed=len(files))]
+def test_commit_summary_aggregates_repositories_types_and_files() -> None:
+    commits = [
+        replace(COMMITS[0], files=("app.py", "shared.py")),
+        replace(
+            COMMITS[0],
+            message="fix(api): 修复接口",
+            repo="octo/api",
+            additions=5,
+            deletions=2,
+            files_changed=2,
+            files=("shared.py", "api.py"),
+            sha="def5678",
+        ),
+        replace(
+            COMMITS[0],
+            message="Add files via upload",
+            repo="octo/demo",
+            additions=1,
+            deletions=0,
+            files_changed=3,
+            files=(),
+            sha="fed4321",
+        ),
+    ]
 
-    markdown = formatter.generate(
+    report = formatter.generate(
         date(2026, 9, 18), MEMBERS, commits, TASKS, MESSAGES, STATUSES, "测试团队"
-    ).markdown
+    )
+    markdown = report.markdown
+    section = markdown.split("### 代码提交", 1)[1].split("### 任务进展", 1)[0]
 
-    assert "（+120/-3，11 个文件：file-0.py、" in markdown
-    assert "file-9.py、…）" in markdown
-    assert "file-10.py" not in markdown  # 第 11 个被截断
+    assert "- 概况：共 3 次提交 · 2 个仓库 · 6 个文件 · +126/-5 行" in section
+    assert "- 改动构成：功能 1 · 修复 1 · 其他 1" in section
+    assert "- 仓库分布：octo/demo 2 次 · octo/api 1 次" in section
+    assert "app.py" not in section
+    assert "def5678" not in section
 
 
-def test_commit_without_file_names_keeps_count_only_format() -> None:
+def test_commit_summary_uses_files_changed_when_file_names_are_missing() -> None:
     commits = [replace(COMMITS[0], files=())]
 
     markdown = formatter.generate(
         date(2026, 9, 18), MEMBERS, commits, TASKS, MESSAGES, STATUSES, "测试团队"
     ).markdown
+    section = markdown.split("### 代码提交", 1)[1].split("### 任务进展", 1)[0]
 
-    assert "feat: 新增静态日报站（+120/-3，4 个文件）" in markdown
-    assert "个文件：" not in markdown  # 没有文件名时不留空冒号
+    assert "- 概况：共 1 次提交 · 1 个仓库 · 4 个文件 · +120/-3 行" in section
+    assert "a.py" not in section
 
 
 def test_hours_section_order_and_content() -> None:
     markdown = _report().markdown
 
-    # 布局顺序照书里 v1.1 的要求：任务进展 → 工时统计 → 协作沟通
-    assert markdown.index("### 任务进展") < markdown.index("### 工时统计") < markdown.index("### 协作沟通")
+    # 协作沟通不再作为成员板块展示
+    assert markdown.index("### 任务进展") < markdown.index("### 工时统计")
+    assert "### 协作沟通" not in markdown
     # v2.7：提交 10:00 + 任务变更 11:00 落在同一工作段（该夹具的评论源是失败态，不计入）
     assert "- 工时：1.5h（提交 1 · 任务 1，1 个工作段）" in markdown
     assert "- 工时：团队合计 1.5h · 人均 0.75h（按提交/任务/评论时间推导，非真实考勤）" in markdown
@@ -327,12 +359,13 @@ def test_empty_member_sections_show_placeholder() -> None:
     markdown = _report().markdown
     zhang_section = markdown.split("## 张三（zhangsan）", 1)[1]
 
-    # v2.4：≥2 个空板块合并成一行（协作沟通是失败态，不参与合并）
+    # v2.4：≥2 个空内容板块合并成一行
     assert zhang_section.count("### 代码提交") == 0
     assert "### 部分板块无记录" in zhang_section
     assert "- 代码提交、任务进展" in zhang_section
     assert zhang_section.count("### 部分板块无记录") == 1
-    assert "- 数据获取失败（GitHub API 超时）" in zhang_section
+    # 评论源失败不再有独立成员板块，仍在管理摘要中明确告警
+    assert "数据源异常：协作沟通（GitHub API 超时）" in markdown
 
 
 def test_merge_empty_sections_rules() -> None:
@@ -352,24 +385,27 @@ def test_merge_empty_sections_rules() -> None:
         "工时统计",
     ]
 
-    sections.insert(2, block("messages", "协作沟通", "empty"))
+    sections[1] = block("tasks", "任务进展", "empty")
     merged = formatter._merge_empty_sections(sections)
 
-    assert [item["title"] for item in merged] == ["部分板块无记录", "任务进展", "工时统计"]
-    assert merged[0]["note"] == "代码提交、协作沟通"
+    assert [item["title"] for item in merged] == ["部分板块无记录", "工时统计"]
+    assert merged[0]["note"] == "代码提交、任务进展"
     assert merged[0]["merged"] is True
 
 
 def test_html_is_escaped_and_renders_sections() -> None:
-    report = formatter.generate(date(2026, 9, 18), MEMBERS, COMMITS, TASKS, MESSAGES, STATUSES_OK, "测试团队")
+    commits = [replace(COMMITS[0], message="<script>alert(1)</script>")]
+    report = formatter.generate(
+        date(2026, 9, 18), MEMBERS, commits, TASKS, MESSAGES, STATUSES_OK, "测试团队"
+    )
     html = report.html
 
     assert "<h3>代码提交</h3>" in html
     assert "<h3>任务进展</h3>" in html
-    assert "<h3>协作沟通</h3>" in html
+    assert "<h3>协作沟通</h3>" not in html
+    assert "octo/demo PR #7" not in html
     assert "&lt;script&gt;" in html
     assert "<script>alert(1)</script>" not in html
-    assert "octo/demo PR #7" in html
 
 
 def test_unmapped_identity_detection() -> None:
@@ -383,22 +419,6 @@ def test_unmapped_identity_detection() -> None:
         files_changed=1,
     )
     assert formatter.find_unmapped(MEMBERS, [*COMMITS, extra], TASKS, MESSAGES) == {"unknown-user"}
-
-
-def test_content_preview_truncates_long_message() -> None:
-    long_text = "feat " + "很长的讨论内容" * 40
-    messages = [
-        MessageRecord(
-            sender="wsh-dotcommer",
-            content=long_text,
-            timestamp=datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc),
-            source="octo/demo PR #7",
-        )
-    ]
-    report = formatter.generate(date(2026, 9, 18), MEMBERS, [], [], messages, STATUSES_OK, "测试团队")
-
-    assert "…" in report.markdown
-    assert long_text not in report.markdown
 
 
 # ===== v2.4：飞书任务状态快照 =====
@@ -491,31 +511,60 @@ def test_feishu_task_section_marks_backfill_and_truncates() -> None:
     assert section.count("- ● 进行中 · 任务 ") == 20  # 最多列 FEISHU_TASK_LIMIT 条
 
 
-def test_commit_html_uses_two_row_entries() -> None:
-    """v2.4：HTML 侧提交行拆成"主行 + 元信息行"，Markdown 侧保持单行。"""
-
+def test_commit_html_renders_summary_cards_without_commit_details() -> None:
     report = _report()
+    section = report.html.split("<h3>代码提交</h3>", 1)[1].split("<h3>任务进展</h3>", 1)[0]
 
-    assert '<li class="line-entry">' in report.html
-    assert '<span class="line-main">octo/demo feat: 新增静态日报站</span>' in report.html
-    assert '<span class="line-meta">' in report.html
-    assert "line-meta" in report.html
-    # 两行制只在 HTML 生效：Markdown（也就是飞书卡片）仍是原来的单行
-    assert (
-        "- `octo/demo` [abc1234](https://github.com/octo/demo/commit/abc1234def) "
-        "feat: 新增静态日报站（+120/-3，4 个文件：a.py、b.py、c.py、d.py）"
-    ) in report.markdown
+    assert 'class="commit-metrics"' in section
+    assert "提交次数" in section and "涉及文件" in section
+    assert "新增行" in section and "删除行" in section
+    assert "改动构成" in section and "仓库分布" in section
+    assert "功能 <b>1</b>" in section
+    assert "octo/demo <b>1 次</b>" in section
+    assert 'style="width: 98%"' in section
+    assert 'style="width: 2%"' in section
+    assert "line-entry" not in section
+    assert "feat: 新增静态日报站" not in section
+    assert "abc1234" not in section
+    assert "a.py" not in section
 
 
-def test_commit_entries_omit_link_when_url_missing() -> None:
-    commits = [replace(COMMITS[0], url="")]
+def test_commit_summary_hides_ratio_bar_when_change_is_zero() -> None:
+    commits = [
+        replace(
+            COMMITS[0],
+            message="Add files via upload",
+            additions=0,
+            deletions=0,
+            files_changed=0,
+            files=(),
+        )
+    ]
 
     report = formatter.generate(
         date(2026, 9, 18), MEMBERS, commits, TASKS, MESSAGES, STATUSES, "测试团队"
     )
+    section = report.html.split("<h3>代码提交</h3>", 1)[1].split("<h3>任务进展</h3>", 1)[0]
 
-    assert '<span class="line-meta">abc1234 · ' in report.html
-    assert "[abc1234](" not in report.html
+    assert "改动构成" in section
+    assert "其他 <b>1</b>" in section
+    assert "commit-change-track" not in section
+    assert "增删构成" not in section
+
+
+def test_commit_summary_mobile_metrics_use_two_columns() -> None:
+    html = _report().html
+
+    assert ".commit-metrics { display: grid; grid-template-columns: repeat(4" in html
+    assert ".commit-metrics { grid-template-columns: repeat(2" in html
+
+
+def test_change_percentages_clamp_nonzero_segments() -> None:
+    assert formatter._change_percentages(0, 0) == (0, 0)
+    assert formatter._change_percentages(10, 0) == (100, 0)
+    assert formatter._change_percentages(0, 10) == (0, 100)
+    assert formatter._change_percentages(1000, 1) == (99, 1)
+    assert formatter._change_percentages(1, 1000) == (1, 99)
 
 
 # ===== v2.8：团队级管理摘要 =====
